@@ -131,8 +131,12 @@ def _get_auth_headers(privkey_hex: str) -> dict:
     }
 
 
-def _get_post_auth_headers(privkey_hex: str, body: dict) -> dict:
-    """Build Lattice auth headers for POST requests. Signs '{body_json};{timestamp}'."""
+def _get_post_auth_headers(privkey_hex: str, body_str: str) -> dict:
+    """Build Lattice auth headers for POST requests.
+
+    Signs '{body_str};{timestamp}'. The body_str must match the exact JSON bytes
+    we send — the Lattice server verifies using JSON.stringify(parsed_body).
+    """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -148,8 +152,7 @@ def _get_post_auth_headers(privkey_hex: str, body: dict) -> dict:
     pubkey_hex = pubkey_bytes.hex()
 
     timestamp = int(time.time())
-    body_json = json.dumps(body, separators=(",", ":"))
-    payload = f"{body_json};{timestamp}".encode("utf-8")
+    payload = f"{body_str};{timestamp}".encode("utf-8")
     signature = private_key.sign(payload)
     sig_hex = signature.hex()
 
@@ -386,17 +389,29 @@ class LatticeAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Not connected")
 
         body = {"to": chat_id, "body": content}
-        body_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        body_bytes = body_str.encode("utf-8")
         headers = {
             "Content-Type": "application/json",
-            **_get_post_auth_headers(self._privkey_hex, body),
+            **_get_post_auth_headers(self._privkey_hex, body_str),
         }
+        pubkey_hex = headers.get("X-Agent-Pubkey", "")
+        logger.info(
+            "Lattice send: to=%s...%s pubkey=%s...%s",
+            chat_id[:8], chat_id[-4:] if len(chat_id) >= 12 else chat_id,
+            pubkey_hex[:8], pubkey_hex[-8:],
+        )
         try:
             resp = await self.client.post(
                 f"{self._lattice_url}/send", content=body_bytes, headers=headers
             )
             if resp.status_code == 404:
                 return SendResult(success=False, error="Agent not connected")
+            if resp.status_code == 401:
+                logger.warning(
+                    "Lattice 401 Invalid signature: pubkey=%s... to=%s body_str=%r",
+                    headers.get("X-Agent-Pubkey", "")[:16], chat_id[:16], body_str,
+                )
             resp.raise_for_status()
             return SendResult(success=True)
         except Exception as e:

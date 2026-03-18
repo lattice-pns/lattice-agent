@@ -69,6 +69,10 @@ def _get_post_auth_headers(privkey_hex: str, body_str: str) -> dict:
     signature = private_key.sign(payload)
     sig_hex = signature.hex()
 
+    logger.debug(
+        "Lattice auth: pubkey=%s...%s timestamp=%d payload_len=%d",
+        pubkey_hex[:8], pubkey_hex[-8:], timestamp, len(payload),
+    )
     return {
         "X-Agent-Pubkey": pubkey_hex,
         "X-Timestamp": str(timestamp),
@@ -98,33 +102,64 @@ async def lattice_send_agent_tool(args: Dict[str, Any], **kwargs) -> str:
     if not privkey_hex:
         return json.dumps({"error": "LATTICE_PRIVATE_KEY_HEX environment variable is not set"})
 
+    # Normalize key: strip non-hex (invisible chars, accidental spaces from paste)
+    raw_key_len = len(privkey_hex)
+    privkey_hex = "".join(c for c in privkey_hex if c in "0123456789abcdefABCDEF").lower()
+    if len(privkey_hex) != 64:
+        return json.dumps({
+            "error": (
+                f"LATTICE_PRIVATE_KEY_HEX must be exactly 64 hex chars (got {len(privkey_hex)}). "
+                f"Raw length was {raw_key_len}. Check ~/.hermes/.env for truncation."
+            )
+        })
+
     # Use exact serialization for both signing and sending — Lattice server verifies
     # signature against JSON.stringify(parsed_body), so we must match that format.
+    # ensure_ascii=False so Unicode in body matches typical JS output (not \uXXXX).
     body = {"to": to, "body": body_text}
-    body_str = json.dumps(body, separators=(",", ":"))
+    body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
     body_bytes = body_str.encode("utf-8")
+
     try:
         headers = {
             "Content-Type": "application/json",
             **_get_post_auth_headers(privkey_hex, body_str),
         }
     except Exception as e:
+        logger.warning("Lattice auth header build failed: %s", e)
         return json.dumps({"error": f"Failed to build auth headers: {e}"})
+
+    send_url = f"{lattice_url}/send"
+    pubkey_hex = headers["X-Agent-Pubkey"]
+    timestamp = headers["X-Timestamp"]
+    logger.info(
+        "Lattice send: to=%s...%s pubkey=%s...%s url=%s",
+        to[:8], to[-4:] if len(to) >= 12 else to,
+        pubkey_hex[:8], pubkey_hex[-8:],
+        send_url,
+    )
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(f"{lattice_url}/send", content=body_bytes, headers=headers)
-            logger.info("Lattice send: status=%d body=%s", resp.status_code, resp.text[:200])
+            resp = await client.post(send_url, content=body_bytes, headers=headers)
+            logger.info("Lattice send response: status=%d %s", resp.status_code, resp.text[:150])
             if resp.status_code == 404:
                 return json.dumps({"error": "Agent not connected"})
+            if resp.status_code == 401:
+                logger.warning(
+                    "Lattice 401 Invalid signature: pubkey=%s timestamp=%s body_str=%r "
+                    "(server verifies signature over body_str;timestamp)",
+                    pubkey_hex, timestamp, body_str,
+                )
             resp.raise_for_status()
+            logger.debug("Lattice send success: to=%s", to[:16])
             return json.dumps({"success": True})
     except httpx.HTTPStatusError as e:
         err = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
         if e.response.status_code == 401:
             err += (
-                " (Check: LATTICE_PRIVATE_KEY_HEX in ~/.hermes/.env matches the key used to connect; "
-                "if you changed it, restart the gateway; ensure system clock is within ±30s)"
+                f" Sender pubkey: {pubkey_hex[:16]}...{pubkey_hex[-8:]}. "
+                "Check: same key in ~/.hermes/.env for this process; restart gateway if changed; clock ±30s."
             )
         return json.dumps({"error": err})
     except Exception as e:
