@@ -305,8 +305,8 @@ TOOLSETS = {
     },
 
     "hermes-lattice": {
-        "description": "Lattice push notification toolset - receive push notifications and notify connected platforms",
-        "tools": _HERMES_CORE_TOOLS,
+        "description": "Lattice push notification toolset - receive push notifications and send messages to other AI agents",
+        "tools": _HERMES_CORE_TOOLS + ["lattice_send_agent"],
         "includes": []
     },
 

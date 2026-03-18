@@ -104,7 +104,7 @@ def get_lattice_public_key() -> str | None:
 
 
 def _get_auth_headers(privkey_hex: str) -> dict:
-    """Build Lattice auth headers: X-Agent-Pubkey, X-Timestamp, X-Signature."""
+    """Build Lattice auth headers for GET requests: X-Agent-Pubkey, X-Timestamp, X-Signature."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -121,6 +121,35 @@ def _get_auth_headers(privkey_hex: str) -> dict:
 
     timestamp = int(time.time())
     payload = f";{timestamp}".encode("utf-8")
+    signature = private_key.sign(payload)
+    sig_hex = signature.hex()
+
+    return {
+        "X-Agent-Pubkey": pubkey_hex,
+        "X-Timestamp": str(timestamp),
+        "X-Signature": sig_hex,
+    }
+
+
+def _get_post_auth_headers(privkey_hex: str, body: dict) -> dict:
+    """Build Lattice auth headers for POST requests. Signs '{body_json};{timestamp}'."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    privkey_bytes = bytes.fromhex(privkey_hex)
+    if len(privkey_bytes) != 32:
+        raise ValueError("LATTICE_PRIVATE_KEY_HEX must be 64 hex chars (32 bytes)")
+
+    private_key = Ed25519PrivateKey.from_private_bytes(privkey_bytes)
+    pubkey_bytes = private_key.public_key().public_bytes(
+        encoding=Encoding.Raw,
+        format=PublicFormat.Raw,
+    )
+    pubkey_hex = pubkey_bytes.hex()
+
+    timestamp = int(time.time())
+    body_json = json.dumps(body, separators=(",", ":"))
+    payload = f"{body_json};{timestamp}".encode("utf-8")
     signature = private_key.sign(payload)
     sig_hex = signature.hex()
 
@@ -288,7 +317,7 @@ class LatticeAdapter(BasePlatformAdapter):
         if event_type == "connected":
             try:
                 data = json.loads(data_str) if data_str else {}
-                device_token = data.get("deviceToken", "")
+                device_token = data.get("pubkey", "")
                 topics = data.get("topics", [])
                 logger.info(
                     "Lattice: connected — device token=%s topics=%s",
@@ -310,18 +339,16 @@ class LatticeAdapter(BasePlatformAdapter):
             logger.debug("Lattice: invalid notification JSON: %s", data_str[:100])
             return
 
-        title = data.get("title", "")
         body = data.get("body", "")
-        if title and body:
-            text = f"{title}: {body}"
-        else:
-            text = body or title or "(empty notification)"
+        sender = data.get("from", "")  # optional sender pubkey hex
+
+        text = body or "(empty notification)"
 
         source = SessionSource(
             platform=Platform.LATTICE,
-            chat_id="lattice",
+            chat_id=sender or "lattice",
             chat_type="dm",
-            user_id="lattice",
+            user_id=sender or "system",
         )
         event = MessageEvent(
             text=text,
@@ -342,9 +369,26 @@ class LatticeAdapter(BasePlatformAdapter):
         reply_to: str | None = None,
         metadata: dict | None = None,
     ) -> SendResult:
-        """Lattice is push-in only; log and return success."""
-        logger.debug("Lattice send (no-op): chat_id=%s len=%d", chat_id, len(content))
-        return SendResult(success=True)
+        """Send a message to another agent via Lattice /send endpoint."""
+        if not self.client:
+            return SendResult(success=False, error="Not connected")
+
+        body = {"to": chat_id, "body": content}
+        headers = {
+            "Content-Type": "application/json",
+            **_get_post_auth_headers(self._privkey_hex, body),
+        }
+        try:
+            resp = await self.client.post(
+                f"{self._lattice_url}/send", json=body, headers=headers
+            )
+            if resp.status_code == 404:
+                return SendResult(success=False, error="Agent not connected")
+            resp.raise_for_status()
+            return SendResult(success=True)
+        except Exception as e:
+            logger.warning("Lattice send failed: %s", e)
+            return SendResult(success=False, error=str(e))
 
     async def get_chat_info(self, chat_id: str) -> dict:
         """Return minimal chat info."""
