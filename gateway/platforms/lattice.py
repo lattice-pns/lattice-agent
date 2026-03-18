@@ -10,6 +10,10 @@ Requires:
 - LATTICE_PRIVATE_KEY_HEX (optional; auto-generated and persisted on first run)
 - LATTICE_TOPICS (optional; comma-separated topics to subscribe to)
 
+Session routing:
+- Lattice never uses its own session — messages always route to the main platform
+  (first connected platform with home channel or allowlist user).
+
 Lattice auth: Ed25519 keypair. Sign payload ";{unix_timestamp}" for GET requests.
 """
 
@@ -368,11 +372,27 @@ class LatticeAdapter(BasePlatformAdapter):
                 f"{text}"
             )
 
+        # Lattice always routes to the main platform — session_target is required.
+        session_target = (self.config.extra or {}).get("session_target")
+        if not isinstance(session_target, dict) or not session_target.get("platform") or not session_target.get("chat_id"):
+            logger.error("Lattice: session_target not configured, dropping notification")
+            return
+        try:
+            target_platform = Platform(session_target["platform"])
+            target_chat_id = str(session_target["chat_id"])
+        except ValueError:
+            logger.error("Lattice: invalid session_target platform %r", session_target.get("platform"))
+            return
         source = SessionSource(
-            platform=Platform.LATTICE,
-            chat_id=sender or "lattice",
+            platform=target_platform,
+            chat_id=target_chat_id,
             chat_type="dm",
-            user_id=sender or "system",
+            user_id=target_chat_id,
+        )
+        logger.debug(
+            "Lattice: routing notification to session %s:%s",
+            target_platform.value,
+            target_chat_id[:16] + "..." if len(target_chat_id) > 16 else target_chat_id,
         )
         event = MessageEvent(
             text=text,
