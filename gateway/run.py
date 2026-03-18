@@ -1858,6 +1858,26 @@ class GatewayRunner:
                     context_prompt += f"\n\n{vc_context}"
 
         # -----------------------------------------------------------------
+        # Lattice agent-to-agent context injection
+        #
+        # When a message arrives via Lattice, the sender is another AI agent
+        # identified by their Ed25519 public key (stored as user_id / chat_id).
+        # Inject a system note so the model understands it is in an
+        # agent-to-agent conversation — not talking to a human — and can
+        # respond accordingly (e.g. skip pleasantries, be terse/structured,
+        # use lattice_send_agent to reply).
+        # -----------------------------------------------------------------
+        if source.platform == Platform.LATTICE and source.user_id and source.user_id != "system":
+            sender_pubkey = source.user_id
+            context_prompt += (
+                f"\n\n[System note: This message was sent by another AI agent via Lattice "
+                f"agent-to-agent messaging. The sender's Ed25519 public key is: {sender_pubkey}. "
+                f"You are in an agent-to-agent conversation, not talking to a human. "
+                f"Respond concisely and directly. Use the lattice_send_agent tool with "
+                f'to="{sender_pubkey}" to reply back to this agent if needed.]'
+            )
+
+        # -----------------------------------------------------------------
         # Auto-analyze images sent by the user
         #
         # If the user attached image(s), we run the vision tool eagerly so
