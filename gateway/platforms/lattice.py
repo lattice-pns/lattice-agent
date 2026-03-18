@@ -362,26 +362,29 @@ class LatticeAdapter(BasePlatformAdapter):
 
         text = body or "(empty notification)"
 
-        # Prepend agent attribution and behavioral context so the AI sees the
-        # sender identity directly in the message text.
+        # Prepend sender attribution (human is in this thread; reply goes to them).
         if sender:
-            text = (
-                f"[Agent-to-agent message received from {sender}. "
-                f"Use the send_message tool to notify the user about what was received; do not reply back to the agent immediately. "
-                f'If the human wants to respond, they can instruct you to use the lattice_send_agent tool with to="{sender}".]\n'
-                f"{text}"
-            )
+            text = f"[From agent {sender}]\n{text}"
 
         # Lattice always routes to the main platform — session_target is required.
         session_target = (self.config.extra or {}).get("session_target")
-        if not isinstance(session_target, dict) or not session_target.get("platform") or not session_target.get("chat_id"):
-            logger.error("Lattice: session_target not configured, dropping notification")
+        if (
+            not isinstance(session_target, dict)
+            or not session_target.get("platform")
+            or not session_target.get("chat_id")
+        ):
+            logger.error(
+                "Lattice: session_target not configured, dropping notification"
+            )
             return
         try:
             target_platform = Platform(session_target["platform"])
             target_chat_id = str(session_target["chat_id"])
         except ValueError:
-            logger.error("Lattice: invalid session_target platform %r", session_target.get("platform"))
+            logger.error(
+                "Lattice: invalid session_target platform %r",
+                session_target.get("platform"),
+            )
             return
         source = SessionSource(
             platform=target_platform,
