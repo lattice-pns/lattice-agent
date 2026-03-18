@@ -895,6 +895,8 @@ class GatewayRunner:
             # Set up message + fatal error handlers
             adapter.set_message_handler(self._handle_message)
             adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
+            if platform == Platform.LATTICE:
+                adapter.set_adapters_getter(lambda: self.adapters)
             
             # Try to connect
             logger.info("Connecting to %s...", platform.value)
@@ -1188,6 +1190,66 @@ class GatewayRunner:
             if not check_lattice_requirements():
                 logger.warning("Lattice: LATTICE_URL not configured")
                 return None
+            # Lattice always routes to the main platform — never uses its own session.
+            # Resolve session_target: explicit config > home channel > first allowlist user.
+            config = self.config.platforms.get(Platform.LATTICE)
+            if config and not (config.extra or {}).get("session_target"):
+                _platform_order = (
+                    Platform.TELEGRAM,
+                    Platform.DISCORD,
+                    Platform.SLACK,
+                    Platform.SIGNAL,
+                    Platform.WHATSAPP,
+                    Platform.MATTERMOST,
+                    Platform.MATRIX,
+                    Platform.EMAIL,
+                    Platform.SMS,
+                )
+                _allowlist_env = {
+                    Platform.TELEGRAM: "TELEGRAM_ALLOWED_USERS",
+                    Platform.DISCORD: "DISCORD_ALLOWED_USERS",
+                    Platform.SLACK: "SLACK_ALLOWED_USERS",
+                    Platform.SIGNAL: "SIGNAL_ALLOWED_USERS",
+                    Platform.MATRIX: "MATRIX_ALLOWED_USERS",
+                    Platform.MATTERMOST: "MATTERMOST_ALLOWED_USERS",
+                    Platform.DINGTALK: "DINGTALK_ALLOWED_USERS",
+                }
+                chat_id = None
+                for p in _platform_order:
+                    if p == Platform.LATTICE:
+                        continue
+                    pcfg = self.config.platforms.get(p)
+                    if not pcfg or not pcfg.enabled:
+                        continue
+                    if pcfg.home_channel:
+                        chat_id = pcfg.home_channel.chat_id
+                        target_platform = p
+                        break
+                    # Fallback: first user from allowlist (DM chat_id ≈ user_id)
+                    env_var = _allowlist_env.get(p)
+                    if env_var:
+                        allowed = os.getenv(env_var, "").strip()
+                        if allowed:
+                            chat_id = allowed.split(",")[0].strip()
+                            target_platform = p
+                            break
+                if chat_id:
+                    config.extra = config.extra or {}
+                    config.extra["session_target"] = {
+                        "platform": target_platform.value,
+                        "chat_id": chat_id,
+                    }
+                    logger.info(
+                        "Lattice: routing to %s session (chat_id=%s)",
+                        target_platform.value,
+                        chat_id[:16] + "..." if len(chat_id) > 16 else chat_id,
+                    )
+                else:
+                    logger.error(
+                        "Lattice requires a main platform (home channel or allowlist). "
+                        "Set lattice.session_target in config.yaml or connect Telegram/Discord first."
+                    )
+                    return None
             return LatticeAdapter(config)
 
         return None

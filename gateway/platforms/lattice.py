@@ -10,6 +10,10 @@ Requires:
 - LATTICE_PRIVATE_KEY_HEX (optional; auto-generated and persisted on first run)
 - LATTICE_TOPICS (optional; comma-separated topics to subscribe to)
 
+Session routing:
+- Lattice never uses its own session — messages always route to the main platform
+  (first connected platform with home channel or allowlist user).
+
 Lattice auth: Ed25519 keypair. Sign payload ";{unix_timestamp}" for GET requests.
 """
 
@@ -192,6 +196,7 @@ class LatticeAdapter(BasePlatformAdapter):
         self.client: httpx.AsyncClient | None = None
         self._sse_task: asyncio.Task | None = None
         self._running = False
+        self._get_adapters = None  # Injected by gateway for response delivery
 
         logger.info(
             "Lattice adapter initialized: url=%s topics=%s",
@@ -235,6 +240,10 @@ class LatticeAdapter(BasePlatformAdapter):
             self.client = None
 
         logger.info("Lattice: disconnected")
+
+    def set_adapters_getter(self, getter) -> None:
+        """Set callback to get platform adapters (for routing responses to main platform)."""
+        self._get_adapters = getter
 
     async def _sse_listener(self) -> None:
         """Listen for SSE events from Lattice server."""
@@ -358,21 +367,41 @@ class LatticeAdapter(BasePlatformAdapter):
 
         text = body or "(empty notification)"
 
-        # Prepend agent attribution and behavioral context so the AI sees the
-        # sender identity directly in the message text.
+        # Prepend sender attribution. The user is in this thread — reply directly;
+        # don't use send_message to "notify" them (they already see this).
         if sender:
-            text = (
-                f"[Agent-to-agent message received from {sender}. "
-                f"Use the send_message tool to notify the user about what was received; do not reply back to the agent immediately. "
-                f'If the human wants to respond, they can instruct you to use the lattice_send_agent tool with to="{sender}".]\n'
-                f"{text}"
-            )
+            text = f"[From agent {sender}. Reply here in this thread — the user sees it.]\n{text}"
 
+        # Lattice always routes to the main platform — session_target is required.
+        session_target = (self.config.extra or {}).get("session_target")
+        if (
+            not isinstance(session_target, dict)
+            or not session_target.get("platform")
+            or not session_target.get("chat_id")
+        ):
+            logger.error(
+                "Lattice: session_target not configured, dropping notification"
+            )
+            return
+        try:
+            target_platform = Platform(session_target["platform"])
+            target_chat_id = str(session_target["chat_id"])
+        except ValueError:
+            logger.error(
+                "Lattice: invalid session_target platform %r",
+                session_target.get("platform"),
+            )
+            return
         source = SessionSource(
-            platform=Platform.LATTICE,
-            chat_id=sender or "lattice",
+            platform=target_platform,
+            chat_id=target_chat_id,
             chat_type="dm",
-            user_id=sender or "system",
+            user_id=target_chat_id,
+        )
+        logger.debug(
+            "Lattice: routing notification to session %s:%s",
+            target_platform.value,
+            target_chat_id[:16] + "..." if len(target_chat_id) > 16 else target_chat_id,
         )
         event = MessageEvent(
             text=text,
@@ -381,10 +410,25 @@ class LatticeAdapter(BasePlatformAdapter):
             raw_message=data,
         )
 
-        if self._message_handler:
+        # Route through the target platform's handle_message so the response is
+        # sent back to the main thread (typing, media extraction, etc. like Telegram).
+        if self._get_adapters:
+            adapters = self._get_adapters()
+            target_adapter = adapters.get(target_platform) if adapters else None
+            if target_adapter and hasattr(target_adapter, "handle_message"):
+                await target_adapter.handle_message(event)
+            elif self._message_handler:
+                # Fallback if adapters not yet available
+                await self._message_handler(event)
+                logger.warning(
+                    "Lattice: response not delivered (target adapter missing)"
+                )
+        elif self._message_handler:
             await self._message_handler(event)
         else:
-            logger.warning("Lattice: no message handler set, dropping notification")
+            logger.warning(
+                "Lattice: no adapters or message handler, dropping notification"
+            )
 
     async def send(
         self,
