@@ -138,6 +138,7 @@ class LatticeAdapter(BasePlatformAdapter):
         self._sse_task: asyncio.Task | None = None
         self._running = False
         self._get_adapters = None  # Injected by gateway for response delivery
+        self._last_event_id: str = ""
 
         logger.info(
             "Lattice adapter initialized: url=%s topics=%s",
@@ -201,6 +202,8 @@ class LatticeAdapter(BasePlatformAdapter):
                     "Accept": "text/event-stream",
                     **get_auth_headers(self._privkey_hex),
                 }
+                if self._last_event_id:
+                    headers["Last-Event-ID"] = self._last_event_id
                 logger.debug("Lattice SSE: connecting to %s", url)
                 async with self.client.stream(
                     "GET",
@@ -272,6 +275,8 @@ class LatticeAdapter(BasePlatformAdapter):
         self, event_type: str, event_id: str, data_str: str
     ) -> None:
         """Handle a complete SSE event."""
+        if event_id:
+            self._last_event_id = event_id
         if event_type == "connected":
             try:
                 data = json.loads(data_str) if data_str else {}
