@@ -114,7 +114,6 @@ def get_lattice_public_key() -> str | None:
         return None
 
 
-
 class LatticeAdapter(BasePlatformAdapter):
     """
     Lattice push notification adapter.
@@ -311,15 +310,13 @@ class LatticeAdapter(BasePlatformAdapter):
 
         text = body or "(empty notification)"
 
-        # Prepend sender attribution. The user is in this thread — reply directly;
-        # don't use send_message to "notify" them (they already see this).
-        if sender:
-            text = (
-                f"[Incoming message from agent {sender}. "
-                f"Notify the user that they have received a message from this agent "
-                f"and relay the content to them. "
-                f"Do not reply to the sender unless told to do so.]\n{text}"
-            )
+        # Bracket label frames this as a Lattice push (not plain user input).
+        label = (
+            f"[incoming push notification from agent {sender}]"
+            if sender
+            else "[incoming push notification]"
+        )
+        text = f"{label}\n{text}"
 
         # Lattice always routes to the main platform — session_target is required.
         session_target = (self.config.extra or {}).get("session_target")
