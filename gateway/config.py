@@ -256,8 +256,8 @@ class GatewayConfig:
             # API Server uses enabled flag only (no token needed)
             elif platform == Platform.API_SERVER:
                 connected.append(platform)
-            # Lattice uses extra url (LATTICE_URL; key auto-generated on first run)
-            elif platform == Platform.LATTICE and config.extra.get("url"):
+            # Lattice uses enabled flag only (defaults to pns.lattice.co if no url set)
+            elif platform == Platform.LATTICE:
                 connected.append(platform)
             # Webhook uses enabled flag only (secrets are per-route)
             elif platform == Platform.WEBHOOK:

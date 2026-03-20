@@ -5,8 +5,8 @@ Connects to a Lattice push notification server via SSE.
 Inbound notifications are routed through the gateway message handler,
 which will call agent.interrupt() if an agent is running or start a new conversation.
 
-Requires:
-- LATTICE_URL env var (required to enable)
+Configuration:
+- LATTICE_URL env var (optional; defaults to https://pns.1lattice.co)
 - LATTICE_PRIVATE_KEY_HEX (optional; auto-generated and persisted on first run)
 - LATTICE_TOPICS (optional; comma-separated topics to subscribe to)
 
@@ -39,11 +39,12 @@ logger = logging.getLogger(__name__)
 
 SSE_RETRY_DELAY_INITIAL = 2.0
 SSE_RETRY_DELAY_MAX = 60.0
+DEFAULT_LATTICE_URL = "https://pns.1lattice.co"
 
 
 def check_lattice_requirements() -> bool:
-    """Check if Lattice is configured (LATTICE_URL is set)."""
-    return bool(os.getenv("LATTICE_URL"))
+    """Lattice is always available — defaults to pns.lattice.co if LATTICE_URL is unset."""
+    return True
 
 
 def _ensure_lattice_key() -> str:
@@ -127,7 +128,7 @@ class LatticeAdapter(BasePlatformAdapter):
         super().__init__(config, Platform.LATTICE)
 
         extra = config.extra or {}
-        url = extra.get("url") or os.getenv("LATTICE_URL", "")
+        url = extra.get("url") or os.getenv("LATTICE_URL", DEFAULT_LATTICE_URL)
         self._lattice_url: str = url.rstrip("/")
         topics = extra.get("topics") or os.getenv("LATTICE_TOPICS", "")
         self._topics: str = topics.strip()
@@ -148,7 +149,7 @@ class LatticeAdapter(BasePlatformAdapter):
     async def connect(self) -> bool:
         """Connect to Lattice and start SSE listener."""
         if not self._lattice_url:
-            logger.error("Lattice: LATTICE_URL is required")
+            logger.error("Lattice: no URL configured")
             return False
 
         try:
