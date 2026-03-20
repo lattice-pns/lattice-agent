@@ -14,6 +14,9 @@ Session routing:
 - Lattice never uses its own session — messages always route to the main platform
   (first connected platform with home channel or allowlist user).
 
+SSE notification JSON may include optional fields: `from` (sender pubkey hex),
+`topic` (topic name when delivered from POST /push/topic).
+
 Lattice auth: Ed25519 keypair. Sign payload ";{unix_timestamp}" for GET requests.
 """
 
@@ -303,16 +306,20 @@ class LatticeAdapter(BasePlatformAdapter):
         logger.info("Lattice: notification raw keys=%s", list(data.keys()))
 
         body = data.get("body", "")
-        sender = data.get("from", "")  # optional sender pubkey hex
+        sender = (data.get("from") or "").strip()  # optional sender pubkey hex
+        topic = (
+            data.get("topic") or ""
+        ).strip()  # optional; set for /push/topic broadcasts
 
         text = body or "(empty notification)"
 
         # Bracket label frames this as a Lattice push (not plain user input).
-        label = (
-            f"[incoming push notification from agent {sender}]"
-            if sender
-            else "[incoming push notification]"
-        )
+        inner = "incoming push notification"
+        if topic:
+            inner += f" on topic {topic}"
+        if sender:
+            inner += f" from agent {sender}"
+        label = f"[{inner}]"
         text = f"{label}\n{text}"
 
         # Lattice always routes to the main platform — session_target is required.
