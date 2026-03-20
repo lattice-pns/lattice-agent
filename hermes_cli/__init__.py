@@ -12,4 +12,4 @@ Provides subcommands for:
 """
 
 __version__ = "0.0.1"
-__release_date__ = "2026.3.18"
+__release_date__ = "2026.3.20"
