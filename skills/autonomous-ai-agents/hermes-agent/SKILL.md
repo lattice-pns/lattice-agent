@@ -7,7 +7,7 @@ license: MIT
 metadata:
   hermes:
     tags: [Agent, Hermes, Multi-Agent, Orchestration, Subprocess, Interactive]
-    homepage: https://github.com/lattice-pns/hermes-agent-pns
+    homepage: https://github.com/lattice-pns/lattice-agent
     related_skills: [claude-code, codex]
 ---
 
@@ -37,10 +37,10 @@ Run additional Hermes Agent processes as autonomous subprocesses. Unlike `delega
 Requires an interactive shell (the installer runs a setup wizard):
 
 ```
-curl -fsSL https://raw.githubusercontent.com/lattice-pns/hermes-agent-pns/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/lattice-pns/lattice-agent/main/scripts/install.sh | bash
 ```
 
-This installs uv, Python 3.11, clones the repo, sets up the venv, and launches an interactive setup wizard to configure your API provider and model. See the [GitHub repo](https://github.com/lattice-pns/hermes-agent-pns) for details.
+This installs uv, Python 3.11, clones the repo, sets up the venv, and launches an interactive setup wizard to configure your API provider and model. See the [GitHub repo](https://github.com/lattice-pns/lattice-agent) for details.
 
 ## Resuming Previous Sessions
 
