@@ -57,6 +57,7 @@ class Platform(Enum):
     DINGTALK = "dingtalk"
     API_SERVER = "api_server"
     LATTICE = "lattice"
+    WEBHOOK = "webhook"
 
 
 @dataclass
@@ -257,6 +258,9 @@ class GatewayConfig:
                 connected.append(platform)
             # Lattice uses extra url (LATTICE_URL; key auto-generated on first run)
             elif platform == Platform.LATTICE and config.extra.get("url"):
+                connected.append(platform)
+            # Webhook uses enabled flag only (secrets are per-route)
+            elif platform == Platform.WEBHOOK:
                 connected.append(platform)
         return connected
     
@@ -751,6 +755,22 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
                 pass
         if api_server_host:
             config.platforms[Platform.API_SERVER].extra["host"] = api_server_host
+
+    # Webhook platform
+    webhook_enabled = os.getenv("WEBHOOK_ENABLED", "").lower() in ("true", "1", "yes")
+    webhook_port = os.getenv("WEBHOOK_PORT")
+    webhook_secret = os.getenv("WEBHOOK_SECRET", "")
+    if webhook_enabled:
+        if Platform.WEBHOOK not in config.platforms:
+            config.platforms[Platform.WEBHOOK] = PlatformConfig()
+        config.platforms[Platform.WEBHOOK].enabled = True
+        if webhook_port:
+            try:
+                config.platforms[Platform.WEBHOOK].extra["port"] = int(webhook_port)
+            except ValueError:
+                pass
+        if webhook_secret:
+            config.platforms[Platform.WEBHOOK].extra["secret"] = webhook_secret
 
     # Session settings
     idle_minutes = os.getenv("SESSION_IDLE_MINUTES")
