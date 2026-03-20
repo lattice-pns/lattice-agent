@@ -25,6 +25,10 @@ class _FakeAgent:
         self.flush_memories = MagicMock()
         self._invalidate_system_prompt = MagicMock()
 
+    def reset_session_state(self):
+        """Match AIAgent.reset_session_state — fake has no token/cost counters to clear."""
+        pass
+
 
 def _make_cli(env_overrides=None, config_overrides=None, **kwargs):
     """Create a HermesCLI instance with minimal mocking."""
@@ -57,6 +61,7 @@ def _make_cli(env_overrides=None, config_overrides=None, **kwargs):
         "prompt_toolkit.widgets": MagicMock(),
         "prompt_toolkit.key_binding": MagicMock(),
         "prompt_toolkit.completion": MagicMock(),
+        "prompt_toolkit.auto_suggest": MagicMock(),
         "prompt_toolkit.formatted_text": MagicMock(),
     }
     with patch.dict(sys.modules, prompt_toolkit_stubs), patch.dict(
