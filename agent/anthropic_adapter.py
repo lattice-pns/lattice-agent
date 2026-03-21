@@ -1036,8 +1036,6 @@ def build_anthropic_kwargs(
                 text = block.get("text", "")
                 text = text.replace("Hermes Agent", "Claude Code")
                 text = text.replace("Hermes agent", "Claude Code")
-                text = text.replace("Lattice Agent", "Claude Code")
-                text = text.replace("Lattice agent", "Claude Code")
                 text = text.replace("hermes-agent", "claude-code")
                 text = text.replace("Nous Research", "Anthropic")
                 block["text"] = text
