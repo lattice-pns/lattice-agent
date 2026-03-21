@@ -2213,7 +2213,7 @@ class AIAgent:
             )
             if _ai_peer_name:
                 _identity = DEFAULT_AGENT_IDENTITY.replace(
-                    "You are Hermes Agent",
+                    "You are Lattice Agent",
                     f"You are {_ai_peer_name}",
                     1,
                 )

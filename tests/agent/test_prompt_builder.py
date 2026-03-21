@@ -5,6 +5,8 @@ import importlib
 import logging
 import sys
 
+import pytest
+
 from agent.prompt_builder import (
     _scan_context_content,
     _truncate_content,
@@ -409,7 +411,7 @@ class TestBuildContextFilesPrompt:
         with patch("pathlib.Path.home", return_value=fake_home):
             result = build_context_files_prompt(cwd=str(tmp_path))
         assert "Project Context" in result
-        assert "# Hermes ☤" in result
+        assert "# Lattice ◇" in result
 
     def test_loads_agents_md(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Use Ruff for linting.")
@@ -561,8 +563,12 @@ class TestBuildContextFilesPrompt:
         assert "Lowercase claude rules" in result
 
     def test_claude_md_uppercase_takes_priority(self, tmp_path):
-        (tmp_path / "CLAUDE.md").write_text("From uppercase.")
-        (tmp_path / "claude.md").write_text("From lowercase.")
+        upper = tmp_path / "CLAUDE.md"
+        lower = tmp_path / "claude.md"
+        upper.write_text("From uppercase.")
+        lower.write_text("From lowercase.")
+        if upper.exists() and lower.exists() and upper.samefile(lower):
+            pytest.skip("Upper/lowercase filenames are the same path on this filesystem")
         result = build_context_files_prompt(cwd=str(tmp_path))
         assert "From uppercase" in result
         assert "From lowercase" not in result
