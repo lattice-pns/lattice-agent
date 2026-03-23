@@ -172,13 +172,14 @@ _TAVILY_BASE_URL = "https://api.tavily.com"
 
 _EXA_BASE_URL = "https://api.exa.ai"
 
+# OpenAPI enum for POST /search ``type`` (see https://docs.exa.ai/reference/search).
+_EXA_SEARCH_TYPES_ALLOWED = frozenset({
+    "neural", "fast", "auto", "deep", "deep-reasoning", "instant",
+})
+
 
 def _exa_search(query: str, limit: int = 5) -> dict:
     """Search using the Exa REST API and return the standard web search dict."""
-    from tools.interrupt import is_interrupted
-    if is_interrupted():
-        return {"error": "Interrupted", "success": False}
-
     api_key = os.getenv("EXA_API_KEY")
     if not api_key:
         raise ValueError(
@@ -187,10 +188,7 @@ def _exa_search(query: str, limit: int = 5) -> dict:
         )
 
     search_type = os.getenv("EXA_SEARCH_TYPE", "auto").lower().strip() or "auto"
-    allowed_types = (
-        "neural", "fast", "auto", "deep", "deep-reasoning", "instant",
-    )
-    if search_type not in allowed_types:
+    if search_type not in _EXA_SEARCH_TYPES_ALLOWED:
         search_type = "auto"
 
     payload: Dict[str, Any] = {
@@ -236,7 +234,12 @@ def _normalize_exa_search_results(response: dict) -> dict:
 
 
 def _exa_contents(urls: List[str]) -> dict:
-    """POST to Exa /contents for page text (markdown-friendly)."""
+    """POST to Exa /contents for page text (markdown-friendly).
+
+    Uses synchronous ``httpx.post`` (same pattern as :func:`_tavily_request`), so the
+    call blocks the event loop for the duration of the request when invoked from
+    ``web_extract_tool``.
+    """
     api_key = os.getenv("EXA_API_KEY")
     if not api_key:
         raise ValueError(
@@ -255,9 +258,7 @@ def _exa_contents(urls: List[str]) -> dict:
 
 def _normalize_exa_documents(raw: dict, requested_urls: List[str]) -> List[Dict[str, Any]]:
     """Normalize Exa /contents response to the shared extract document list."""
-    items = raw.get("results")
-    if items is None:
-        items = raw.get("contents") or []
+    items = raw.get("results") or []
 
     by_url: Dict[str, Dict[str, Any]] = {}
     for item in items:
@@ -1042,8 +1043,12 @@ async def web_extract_tool(
                     continue
                 pending.append(url)
             if pending:
-                raw = _exa_contents(pending)
-                results.extend(_normalize_exa_documents(raw, pending))
+                if _is_interrupted():
+                    for u in pending:
+                        results.append({"url": u, "error": "Interrupted", "title": ""})
+                else:
+                    raw = _exa_contents(pending)
+                    results.extend(_normalize_exa_documents(raw, pending))
         else:
             # ── Firecrawl extraction ──
             # Determine requested formats for Firecrawl v2

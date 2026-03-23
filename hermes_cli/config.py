@@ -599,6 +599,19 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "EXA_SEARCH_TYPE": {
+        "description": (
+            "Optional Exa /search request type (default: auto). "
+            "Use the API enum: neural, fast, auto, deep, deep-reasoning, instant. "
+            "Invalid values fall back to auto."
+        ),
+        "prompt": "Exa search type (optional, empty = auto)",
+        "url": "https://docs.exa.ai/reference/search",
+        "password": False,
+        "category": "tool",
+        "tools": ["web_search"],
+        "advanced": True,
+    },
     "BROWSERBASE_API_KEY": {
         "description": "Browserbase API key for cloud browser (optional — local browser works without this)",
         "prompt": "Browserbase API key",
