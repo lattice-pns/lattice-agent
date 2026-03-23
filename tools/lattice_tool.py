@@ -16,6 +16,7 @@ import os
 from typing import Any, Dict
 
 from tools.lattice_auth import get_post_auth_headers
+from tools.registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,6 @@ def check_lattice_requirements() -> bool:
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
-
-from tools.registry import registry
 
 registry.register(
     name="lattice_send",
