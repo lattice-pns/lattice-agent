@@ -174,7 +174,7 @@ _EXA_BASE_URL = "https://api.exa.ai"
 
 # OpenAPI enum for POST /search ``type`` (see https://docs.exa.ai/reference/search).
 _EXA_SEARCH_TYPES_ALLOWED = frozenset({
-    "neural", "keyword", "fast", "auto", "deep", "deep-reasoning", "instant",
+    "neural", "fast", "auto", "deep", "deep-reasoning", "instant",
 })
 
 
