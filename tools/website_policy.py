@@ -140,21 +140,23 @@ def load_website_blocklist(config_path: Optional[Path] = None) -> Dict[str, Any]
     """
     global _cached_policy, _cached_policy_path, _cached_policy_time
 
-    resolved_path = str(config_path) if config_path else "__default__"
+    # Cache only when resolving the default config path (``HERMES_HOME``/config.yaml).
+    # Key must be the resolved path string so ``HERMES_HOME`` changes invalidate the cache.
+    use_cache = config_path is None
+    effective_path = (config_path or _get_default_config_path()).resolve()
+    cache_key = str(effective_path)
     now = time.monotonic()
 
-    # Return cached policy if still fresh and same path
-    if config_path is None:
+    if use_cache:
         with _cache_lock:
             if (
                 _cached_policy is not None
-                and _cached_policy_path == resolved_path
+                and _cached_policy_path == cache_key
                 and (now - _cached_policy_time) < _CACHE_TTL_SECONDS
             ):
                 return _cached_policy
 
-    config_path = config_path or _get_default_config_path()
-    policy = _load_policy_config(config_path)
+    policy = _load_policy_config(effective_path)
 
     raw_domains = policy.get("domains", []) or []
     if not isinstance(raw_domains, list):
@@ -192,11 +194,10 @@ def load_website_blocklist(config_path: Optional[Path] = None) -> Dict[str, Any]
 
     result = {"enabled": enabled, "rules": rules}
 
-    # Cache the result (only for the default path — explicit paths are tests)
-    if config_path == _get_default_config_path():
+    if use_cache:
         with _cache_lock:
             _cached_policy = result
-            _cached_policy_path = "__default__"
+            _cached_policy_path = cache_key
             _cached_policy_time = now
 
     return result
@@ -204,9 +205,11 @@ def load_website_blocklist(config_path: Optional[Path] = None) -> Dict[str, Any]
 
 def invalidate_cache() -> None:
     """Force the next ``check_website_access`` call to re-read config."""
-    global _cached_policy
+    global _cached_policy, _cached_policy_path, _cached_policy_time
     with _cache_lock:
         _cached_policy = None
+        _cached_policy_path = None
+        _cached_policy_time = 0.0
 
 
 def _match_host_against_rule(host: str, pattern: str) -> bool:
@@ -242,11 +245,16 @@ def check_website_access(url: str, config_path: Optional[Path] = None) -> Option
     (fail-open) so a config typo doesn't break all web tools.  Pass
     ``config_path`` explicitly (tests) to get strict error propagation.
     """
-    # Fast path: if no explicit config_path and the cached policy is disabled
-    # or empty, skip all work (no YAML read, no host extraction).
+    # Fast path: if no explicit config_path and the cached policy for this
+    # default config path is disabled, skip all work (no YAML read, no host extraction).
     if config_path is None:
+        default_key = str(_get_default_config_path().resolve())
         with _cache_lock:
-            if _cached_policy is not None and not _cached_policy.get("enabled"):
+            if (
+                _cached_policy is not None
+                and _cached_policy_path == default_key
+                and not _cached_policy.get("enabled")
+            ):
                 return None
 
     host = _extract_host_from_urlish(url)
