@@ -45,18 +45,6 @@ SSE_RETRY_DELAY_MAX = 60.0
 DEFAULT_LATTICE_URL = "https://pns.1lattice.co"
 
 
-def _infer_chat_type_for_session_target(platform: Platform, chat_id: str) -> str:
-    """Best-effort chat type for Lattice-routed targets (no live platform API call)."""
-    if platform == Platform.TELEGRAM:
-        try:
-            if int(chat_id) < 0:
-                # Groups, supergroups, and channels use negative Telegram chat ids.
-                return "group"
-        except (ValueError, TypeError):
-            pass
-    return "dm"
-
-
 def check_lattice_requirements() -> bool:
     """Lattice is always available — defaults to pns.lattice.co if LATTICE_URL is unset."""
     return True
@@ -357,9 +345,7 @@ class LatticeAdapter(BasePlatformAdapter):
         source = SessionSource(
             platform=target_platform,
             chat_id=target_chat_id,
-            chat_type=_infer_chat_type_for_session_target(
-                target_platform, target_chat_id
-            ),
+            chat_type="dm",
             user_id=None,
             lattice_routed=True,
         )

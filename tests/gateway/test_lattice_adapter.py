@@ -9,7 +9,6 @@ from gateway.config import GatewayConfig, Platform, PlatformConfig
 from gateway.platforms.lattice import (
     DEFAULT_LATTICE_URL,
     LatticeAdapter,
-    _infer_chat_type_for_session_target,
     check_lattice_requirements,
     get_lattice_public_key,
 )
@@ -19,17 +18,6 @@ from gateway.run import GatewayRunner
 
 TEST_PRIVKEY_HEX = "00" * 32
 RECIPIENT_HEX = "ab" * 32
-
-
-class TestInferChatTypeForSessionTarget:
-    def test_telegram_negative_is_group(self):
-        assert (
-            _infer_chat_type_for_session_target(Platform.TELEGRAM, "-1001234567890")
-            == "group"
-        )
-
-    def test_telegram_positive_is_dm(self):
-        assert _infer_chat_type_for_session_target(Platform.TELEGRAM, "999") == "dm"
 
 
 class TestLatticeRoutedAuthorization:
@@ -44,7 +32,7 @@ class TestLatticeRoutedAuthorization:
         source = SessionSource(
             platform=Platform.TELEGRAM,
             chat_id="-1001234567890",
-            chat_type="group",
+            chat_type="dm",
             user_id=None,
             lattice_routed=True,
         )
@@ -219,36 +207,6 @@ class TestLatticeAdapterNotifications:
         assert event.source.lattice_routed is True
         assert event.source.user_id is None
         assert event.source.chat_type == "dm"
-
-    @pytest.mark.asyncio
-    async def test_routes_to_telegram_group_sets_group_chat_type(self, monkeypatch):
-        monkeypatch.setenv("LATTICE_PRIVATE_KEY_HEX", TEST_PRIVKEY_HEX)
-        cfg = PlatformConfig(
-            enabled=True,
-            extra={
-                "url": "http://x",
-                "session_target": {
-                    "platform": "telegram",
-                    "chat_id": "-1001234567890",
-                },
-            },
-        )
-        adapter = LatticeAdapter(cfg)
-
-        target_handle = AsyncMock()
-        target_adapter = MagicMock()
-        target_adapter.handle_message = target_handle
-
-        runner = MagicMock()
-        runner.adapters = {Platform.TELEGRAM: target_adapter}
-        adapter.gateway_runner = runner
-
-        await adapter._process_notification(json.dumps({"body": "alert"}))
-
-        target_handle.assert_awaited_once()
-        event = target_handle.await_args.args[0]
-        assert event.source.chat_type == "group"
-        assert event.source.lattice_routed is True
 
     @pytest.mark.asyncio
     async def test_fallback_message_handler(self, monkeypatch):
