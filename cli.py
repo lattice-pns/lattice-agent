@@ -448,7 +448,6 @@ from rich import box as rich_box
 from rich.console import Console
 from rich.markup import escape as _escape
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text as _RichText
 
 import fire
@@ -460,12 +459,12 @@ from model_tools import get_tool_definitions, get_toolset_for_tool
 # Extracted CLI modules (Phase 3)
 from hermes_cli.banner import (
     cprint as _cprint, _GOLD, _BOLD, _DIM, _RST,
-    VERSION, RELEASE_DATE, HERMES_AGENT_LOGO, HERMES_CADUCEUS, COMPACT_BANNER,
+    HERMES_AGENT_LOGO, HERMES_CADUCEUS, COMPACT_BANNER,
     build_welcome_banner,
 )
 from hermes_cli.commands import COMMANDS, SlashCommandCompleter, SlashCommandAutoSuggest
 from hermes_cli import callbacks as _callbacks
-from toolsets import get_all_toolsets, get_toolset_info, resolve_toolset, validate_toolset
+from toolsets import get_all_toolsets, get_toolset_info, validate_toolset
 
 # Cron job system for scheduled tasks (execution is handled by the gateway)
 from cron import get_job
@@ -497,6 +496,14 @@ def _run_cleanup():
     try:
         from tools.mcp_tool import shutdown_mcp_servers
         shutdown_mcp_servers()
+    except Exception:
+        pass
+    # Close cached auxiliary LLM clients (sync + async) so that
+    # AsyncHttpxClientWrapper.__del__ doesn't fire on a closed event loop
+    # and trigger prompt_toolkit's "Press ENTER to continue..." handler.
+    try:
+        from agent.auxiliary_client import shutdown_cached_clients
+        shutdown_cached_clients()
     except Exception:
         pass
 
@@ -884,7 +891,6 @@ def _build_compact_banner() -> str:
 
 from agent.skill_commands import (
     scan_skill_commands,
-    get_skill_commands,
     build_skill_invocation_message,
     build_plan_path,
     build_preloaded_skills_prompt,
@@ -1756,8 +1762,22 @@ class HermesCLI:
         resolved_acp_command = runtime.get("command")
         resolved_acp_args = list(runtime.get("args") or [])
         if not isinstance(api_key, str) or not api_key:
-            self.console.print("[bold red]Provider resolver returned an empty API key.[/]")
-            return False
+            # Custom / local endpoints (llama.cpp, ollama, vLLM, etc.) often
+            # don't require authentication.  When a base_url IS configured but
+            # no API key was found, use a placeholder so the OpenAI SDK
+            # doesn't reject the request and local servers just ignore it.
+            _source = runtime.get("source", "")
+            _has_custom_base = isinstance(base_url, str) and base_url and "openrouter.ai" not in base_url
+            if _has_custom_base:
+                api_key = "no-key-required"
+                logger.debug(
+                    "No API key for custom endpoint %s (source=%s), "
+                    "using placeholder — local servers typically ignore auth",
+                    base_url, _source,
+                )
+            else:
+                self.console.print("[bold red]Provider resolver returned an empty API key.[/]")
+                return False
         if not isinstance(base_url, str) or not base_url:
             self.console.print("[bold red]Provider resolver returned an empty base URL.[/]")
             return False
