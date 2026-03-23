@@ -6,6 +6,7 @@ from hermes_cli.tools_config import (
     _get_platform_tools,
     _platform_toolset_summary,
     _save_platform_tools,
+    _toolset_enabled_on_any_platform,
     _toolset_has_keys,
 )
 
@@ -33,6 +34,13 @@ def test_platform_toolset_summary_uses_explicit_platform_list():
 
     assert set(summary.keys()) == {"cli"}
     assert summary["cli"] == _get_platform_tools(config, "cli")
+
+
+def test_toolset_enabled_on_any_platform_detects_web_on_cli():
+    config = {"platform_toolsets": {"cli": ["web", "terminal", "file"]}}
+
+    assert _toolset_enabled_on_any_platform("web", config) is True
+    assert _toolset_enabled_on_any_platform("image_gen", config) is False
 
 
 def test_toolset_has_keys_for_vision_accepts_codex_auth(tmp_path, monkeypatch):

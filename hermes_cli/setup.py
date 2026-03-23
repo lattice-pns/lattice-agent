@@ -581,11 +581,19 @@ def _print_setup_summary(config: dict, hermes_home):
     else:
         tool_status.append(("Mixture of Agents", False, "OPENROUTER_API_KEY"))
 
-    # Web tools (Parallel, Firecrawl, or Tavily)
-    if get_env_value("PARALLEL_API_KEY") or get_env_value("FIRECRAWL_API_KEY") or get_env_value("FIRECRAWL_API_URL") or get_env_value("TAVILY_API_KEY"):
+    # Web tools (Parallel, Firecrawl, Tavily, or Exa)
+    if (
+        get_env_value("PARALLEL_API_KEY")
+        or get_env_value("FIRECRAWL_API_KEY")
+        or get_env_value("FIRECRAWL_API_URL")
+        or get_env_value("TAVILY_API_KEY")
+        or get_env_value("EXA_API_KEY")
+    ):
         tool_status.append(("Web Search & Extract", True, None))
     else:
-        tool_status.append(("Web Search & Extract", False, "PARALLEL_API_KEY, FIRECRAWL_API_KEY, or TAVILY_API_KEY"))
+        tool_status.append(
+            ("Web Search & Extract", False, "PARALLEL_API_KEY, FIRECRAWL_API_KEY, TAVILY_API_KEY, or EXA_API_KEY")
+        )
 
     # Browser tools (local Chromium or Browserbase cloud)
     import shutil
@@ -2996,6 +3004,10 @@ def setup_tools(config: dict, first_install: bool = False):
 
     Both `hermes setup tools` and `hermes tools` use the same flow:
     platform selection → toolset toggles → provider/API key configuration.
+
+    Web search (Exa, Tavily, Firecrawl, …): enable the web toolset under a
+    platform, then choose **Reconfigure an existing tool** in the tools menu
+    (unless keys are already present — web will appear in that list once enabled).
 
     Args:
         first_install: When True, uses the simplified first-install flow

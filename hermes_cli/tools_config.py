@@ -204,6 +204,14 @@ TOOL_CATEGORIES = {
                 ],
             },
             {
+                "name": "Exa",
+                "tag": "Neural web search and URL contents (see https://exa.ai)",
+                "web_backend": "exa",
+                "env_vars": [
+                    {"key": "EXA_API_KEY", "prompt": "Exa API key", "url": "https://dashboard.exa.ai/api-keys"},
+                ],
+            },
+            {
                 "name": "Firecrawl Self-Hosted",
                 "tag": "Free - run your own instance",
                 "web_backend": "firecrawl",
@@ -507,6 +515,14 @@ def _toolset_has_keys(ts_key: str) -> bool:
     if not requirements:
         return True
     return all(get_env_value(var) for var, _ in requirements)
+
+
+def _toolset_enabled_on_any_platform(ts_key: str, config: dict) -> bool:
+    """True if ``ts_key`` is enabled for at least one active platform (cli, telegram, …)."""
+    for pkey in _get_enabled_platforms():
+        if ts_key in _get_platform_tools(config, pkey):
+            return True
+    return False
 
 
 # ─── Menu Helpers ─────────────────────────────────────────────────────────────
@@ -848,17 +864,22 @@ def _configure_simple_requirements(ts_key: str):
 
 def _reconfigure_tool(config: dict):
     """Let user reconfigure an existing tool's provider or API key."""
-    # Build list of configurable tools that are currently set up
+    # Include toolsets that already have keys OR are enabled somewhere but
+    # still need a provider/API key (e.g. web enabled with no search key yet).
     configurable = []
     for ts_key, ts_label, _ in _get_effective_configurable_toolsets():
         cat = TOOL_CATEGORIES.get(ts_key)
         reqs = TOOLSET_ENV_REQUIREMENTS.get(ts_key)
         if cat or reqs:
-            if _toolset_has_keys(ts_key):
+            if _toolset_has_keys(ts_key) or _toolset_enabled_on_any_platform(ts_key, config):
                 configurable.append((ts_key, ts_label))
 
     if not configurable:
-        _print_info("No configured tools to reconfigure.")
+        _print_info("No tools available to reconfigure yet.")
+        _print_info(
+            "Enable a tool under a platform first (e.g. 'Configure CLI' → Web Search & Scraping), "
+            "then choose 'Reconfigure an existing tool' again."
+        )
         return
 
     choices = [label for _, label in configurable]
@@ -1023,6 +1044,12 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
     print(color("⚕ Hermes Tool Configuration", Colors.CYAN, Colors.BOLD))
     print(color("  Enable or disable tools per platform.", Colors.DIM))
     print(color("  Tools that need API keys will be configured when enabled.", Colors.DIM))
+    if not first_install:
+        print(color(
+            "  Web search: enable 'Web Search & Scraping' for a platform, then "
+            "'Reconfigure an existing tool' to pick Exa, Tavily, Firecrawl, etc.",
+            Colors.DIM,
+        ))
     print()
 
     # ── First-time install: linear flow, no platform menu ──

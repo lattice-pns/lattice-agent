@@ -130,7 +130,7 @@ class TestBackendSelection:
     setups.
     """
 
-    _ENV_KEYS = ("PARALLEL_API_KEY", "FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "TAVILY_API_KEY")
+    _ENV_KEYS = ("PARALLEL_API_KEY", "FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "TAVILY_API_KEY", "EXA_API_KEY")
 
     def setup_method(self):
         for key in self._ENV_KEYS:
@@ -180,6 +180,18 @@ class TestBackendSelection:
         with patch("tools.web_tools._load_web_config", return_value={"backend": "Tavily"}):
             assert _get_backend() == "tavily"
 
+    def test_config_exa(self):
+        """web.backend=exa in config → 'exa'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "exa"}):
+            assert _get_backend() == "exa"
+
+    def test_config_exa_case_insensitive(self):
+        """web.backend=Exa (mixed case) → 'exa'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={"backend": "Exa"}):
+            assert _get_backend() == "exa"
+
     # ── Fallback (no web.backend in config) ───────────────────────────
 
     def test_fallback_parallel_only_key(self):
@@ -194,6 +206,34 @@ class TestBackendSelection:
         from tools.web_tools import _get_backend
         with patch("tools.web_tools._load_web_config", return_value={}), \
              patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test"}):
+            assert _get_backend() == "tavily"
+
+    def test_fallback_exa_only_key(self):
+        """Only EXA_API_KEY set → 'exa'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"EXA_API_KEY": "exa-test"}):
+            assert _get_backend() == "exa"
+
+    def test_fallback_exa_with_firecrawl_prefers_firecrawl(self):
+        """Exa + Firecrawl keys, no config → 'firecrawl' (backward compat)."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "FIRECRAWL_API_KEY": "fc-test"}):
+            assert _get_backend() == "firecrawl"
+
+    def test_fallback_exa_with_parallel_prefers_parallel(self):
+        """Exa + Parallel keys, no config → 'parallel'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "PARALLEL_API_KEY": "par-test"}):
+            assert _get_backend() == "parallel"
+
+    def test_fallback_exa_with_tavily_prefers_tavily(self):
+        """Exa + Tavily keys, no config → 'tavily'."""
+        from tools.web_tools import _get_backend
+        with patch("tools.web_tools._load_web_config", return_value={}), \
+             patch.dict(os.environ, {"EXA_API_KEY": "exa-test", "TAVILY_API_KEY": "tvly-test"}):
             assert _get_backend() == "tavily"
 
     def test_fallback_tavily_with_firecrawl_prefers_firecrawl(self):
@@ -279,7 +319,7 @@ class TestParallelClientConfig:
 class TestCheckWebApiKey:
     """Test suite for check_web_api_key() unified availability check."""
 
-    _ENV_KEYS = ("PARALLEL_API_KEY", "FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "TAVILY_API_KEY")
+    _ENV_KEYS = ("PARALLEL_API_KEY", "FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "TAVILY_API_KEY", "EXA_API_KEY")
 
     def setup_method(self):
         for key in self._ENV_KEYS:
@@ -306,6 +346,11 @@ class TestCheckWebApiKey:
 
     def test_tavily_key_only(self):
         with patch.dict(os.environ, {"TAVILY_API_KEY": "tvly-test"}):
+            from tools.web_tools import check_web_api_key
+            assert check_web_api_key() is True
+
+    def test_exa_key_only(self):
+        with patch.dict(os.environ, {"EXA_API_KEY": "exa-test"}):
             from tools.web_tools import check_web_api_key
             assert check_web_api_key() is True
 

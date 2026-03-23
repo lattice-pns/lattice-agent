@@ -121,6 +121,7 @@ def show_status(args):
         "MiniMax-CN": "MINIMAX_CN_API_KEY",
         "Firecrawl": "FIRECRAWL_API_KEY",
         "Tavily": "TAVILY_API_KEY",
+        "Exa": "EXA_API_KEY",
         "Browserbase": "BROWSERBASE_API_KEY",  # Optional — local browser works without this
         "FAL": "FAL_KEY",
         "Tinker": "TINKER_API_KEY",

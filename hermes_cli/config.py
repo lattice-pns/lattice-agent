@@ -591,6 +591,27 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "EXA_API_KEY": {
+        "description": "Exa API key for neural web search and URL content extraction",
+        "prompt": "Exa API key",
+        "url": "https://dashboard.exa.ai/api-keys",
+        "tools": ["web_search", "web_extract"],
+        "password": True,
+        "category": "tool",
+    },
+    "EXA_SEARCH_TYPE": {
+        "description": (
+            "Optional Exa /search request type (default: auto). "
+            "Use the API enum: neural, fast, auto, deep, deep-reasoning, instant. "
+            "Invalid values fall back to auto."
+        ),
+        "prompt": "Exa search type (optional, empty = auto)",
+        "url": "https://docs.exa.ai/reference/search",
+        "password": False,
+        "category": "tool",
+        "tools": ["web_search"],
+        "advanced": True,
+    },
     "BROWSERBASE_API_KEY": {
         "description": "Browserbase API key for cloud browser (optional — local browser works without this)",
         "prompt": "Browserbase API key",
@@ -1614,6 +1635,7 @@ def show_config():
         ("PARALLEL_API_KEY", "Parallel"),
         ("FIRECRAWL_API_KEY", "Firecrawl"),
         ("TAVILY_API_KEY", "Tavily"),
+        ("EXA_API_KEY", "Exa"),
         ("BROWSERBASE_API_KEY", "Browserbase"),
         ("BROWSER_USE_API_KEY", "Browser Use"),
         ("FAL_KEY", "FAL"),
@@ -1762,7 +1784,7 @@ def set_config_value(key: str, value: str):
     # Check if it's an API key (goes to .env)
     api_keys = [
         'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'VOICE_TOOLS_OPENAI_KEY',
-        'PARALLEL_API_KEY', 'FIRECRAWL_API_KEY', 'FIRECRAWL_API_URL', 'TAVILY_API_KEY',
+        'PARALLEL_API_KEY', 'FIRECRAWL_API_KEY', 'FIRECRAWL_API_URL', 'TAVILY_API_KEY', 'EXA_API_KEY',
         'BROWSERBASE_API_KEY', 'BROWSERBASE_PROJECT_ID', 'BROWSER_USE_API_KEY',
         'FAL_KEY', 'TELEGRAM_BOT_TOKEN', 'DISCORD_BOT_TOKEN',
         'TERMINAL_SSH_HOST', 'TERMINAL_SSH_USER', 'TERMINAL_SSH_KEY',
