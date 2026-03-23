@@ -174,7 +174,7 @@ _EXA_BASE_URL = "https://api.exa.ai"
 
 # OpenAPI enum for POST /search ``type`` (see https://docs.exa.ai/reference/search).
 _EXA_SEARCH_TYPES_ALLOWED = frozenset({
-    "neural", "fast", "auto", "deep", "deep-reasoning", "instant",
+    "neural", "keyword", "fast", "auto", "deep", "deep-reasoning", "instant",
 })
 
 
@@ -805,7 +805,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
     Search the web for information using available search API backend.
 
     This function provides a generic interface for web search that can work
-    with multiple backends (Parallel or Firecrawl).
+    with multiple backends (Parallel, Firecrawl, Tavily, or Exa).
 
     Note: This function returns search result metadata only (URLs, titles, descriptions).
     Use web_extract_tool to get full content from specific URLs.
@@ -969,8 +969,8 @@ async def web_extract_tool(
     Extract content from specific web pages using available extraction API backend.
     
     This function provides a generic interface for web content extraction that
-    can work with multiple backends. Currently uses Firecrawl.
-    
+    can work with multiple backends (Parallel, Firecrawl, Tavily, or Exa).
+
     Args:
         urls (List[str]): List of URLs to extract content from
         format (str): Desired output format ("markdown" or "html", optional)
@@ -1021,15 +1021,16 @@ async def web_extract_tool(
             logger.info("Exa extract: %d URL(s)", len(urls))
             from tools.interrupt import is_interrupted as _is_interrupted
             pending: List[str] = []
-            results = []
-            for url in urls:
+            results: List[Any] = [None] * len(urls)
+            url_to_index = {url: i for i, url in enumerate(urls)}
+            for i, url in enumerate(urls):
                 if _is_interrupted():
-                    results.append({"url": url, "error": "Interrupted", "title": ""})
+                    results[i] = {"url": url, "error": "Interrupted", "title": ""}
                     continue
                 blocked = check_website_access(url)
                 if blocked:
                     logger.info("Blocked web_extract for %s by rule %s", blocked["host"], blocked["rule"])
-                    results.append({
+                    results[i] = {
                         "url": url,
                         "title": "",
                         "content": "",
@@ -1039,16 +1040,17 @@ async def web_extract_tool(
                             "rule": blocked["rule"],
                             "source": blocked["source"],
                         },
-                    })
+                    }
                     continue
                 pending.append(url)
             if pending:
                 if _is_interrupted():
                     for u in pending:
-                        results.append({"url": u, "error": "Interrupted", "title": ""})
+                        results[url_to_index[u]] = {"url": u, "error": "Interrupted", "title": ""}
                 else:
                     raw = _exa_contents(pending)
-                    results.extend(_normalize_exa_documents(raw, pending))
+                    for doc in _normalize_exa_documents(raw, pending):
+                        results[url_to_index[doc["url"]]] = doc
         else:
             # ── Firecrawl extraction ──
             # Determine requested formats for Firecrawl v2
@@ -1304,8 +1306,8 @@ async def web_crawl_tool(
     Crawl a website with specific instructions using available crawling API backend.
     
     This function provides a generic interface for web crawling that can work
-    with multiple backends. Currently uses Firecrawl.
-    
+    with multiple backends (Parallel, Firecrawl, Tavily, or Exa).
+
     Args:
         url (str): The base URL to crawl (can include or exclude https://)
         instructions (str): Instructions for what to crawl/extract using LLM intelligence (optional)
