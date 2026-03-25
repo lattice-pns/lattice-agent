@@ -218,6 +218,168 @@ class TestLatticeAdapterNotifications:
         handler.assert_awaited_once()
 
 
+class TestLatticeNotificationBackground:
+    """Background autonomous processing of Lattice push notifications."""
+
+    def _make_lattice_routed_event(self) -> MessageEvent:
+        source = SessionSource(
+            platform=Platform.TELEGRAM,
+            chat_id="999",
+            chat_type="dm",
+            user_id=None,
+            lattice_routed=True,
+        )
+        return MessageEvent(
+            text="[incoming push notification]\nserver CPU at 95%",
+            message_type=MessageType.TEXT,
+            source=source,
+        )
+
+    @pytest.mark.asyncio
+    async def test_lattice_routed_goes_to_background_not_main_thread(self, tmp_path):
+        """lattice_routed events must be redirected to background processing."""
+        from gateway.config import GatewayConfig, PlatformConfig
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        bg_called_with = []
+
+        async def fake_bg(ev):
+            bg_called_with.append(ev)
+
+        runner._handle_lattice_notification_background = fake_bg
+
+        event = self._make_lattice_routed_event()
+        result = await runner._handle_message(event)
+
+        assert result is None
+        # Give the create_task a chance to run
+        import asyncio
+        await asyncio.sleep(0)
+        assert len(bg_called_with) == 1
+        assert bg_called_with[0] is event
+
+    @pytest.mark.asyncio
+    async def test_notify_user_prefix_delivers_message(self, tmp_path):
+        """[NOTIFY_USER] prefix causes adapter.send with the stripped message."""
+        from gateway.config import GatewayConfig
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        mock_adapter = MagicMock()
+        mock_adapter.send = AsyncMock()
+        runner.adapters[Platform.TELEGRAM] = mock_adapter
+
+        event = self._make_lattice_routed_event()
+
+        with patch("run_agent.AIAgent") as MockAgent:
+            mock_instance = MagicMock()
+            mock_instance.run_conversation.return_value = {
+                "final_response": "[NOTIFY_USER]\nHey, the deployment failed!"
+            }
+            MockAgent.return_value = mock_instance
+
+            with patch("gateway.run._resolve_runtime_agent_kwargs", return_value={"api_key": "k"}):
+                with patch("gateway.run._resolve_gateway_model", return_value="test-model"):
+                    with patch.object(runner, "_resolve_turn_agent_config", return_value={"model": "test-model", "runtime": {"api_key": "k"}}):
+                        with patch.object(runner, "_load_reasoning_config", return_value={}):
+                            with patch("asyncio.get_event_loop") as mock_loop:
+                                mock_loop.return_value.run_in_executor = AsyncMock(
+                                    return_value={"final_response": "[NOTIFY_USER]\nHey, the deployment failed!"}
+                                )
+                                await runner._handle_lattice_notification_background(event)
+
+        mock_adapter.send.assert_awaited_once()
+        call_kwargs = mock_adapter.send.await_args
+        sent_content = call_kwargs.kwargs.get("content")
+        assert sent_content == "Hey, the deployment failed!"
+
+    @pytest.mark.asyncio
+    async def test_silent_processing_sends_nothing(self, tmp_path):
+        """No prefix means agent handled it silently — adapter.send must NOT be called."""
+        from gateway.config import GatewayConfig
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        mock_adapter = MagicMock()
+        mock_adapter.send = AsyncMock()
+        runner.adapters[Platform.TELEGRAM] = mock_adapter
+
+        event = self._make_lattice_routed_event()
+
+        with patch("gateway.run._resolve_runtime_agent_kwargs", return_value={"api_key": "k"}):
+            with patch("gateway.run._resolve_gateway_model", return_value="test-model"):
+                with patch.object(runner, "_resolve_turn_agent_config", return_value={"model": "test-model", "runtime": {"api_key": "k"}}):
+                    with patch.object(runner, "_load_reasoning_config", return_value={}):
+                        with patch("asyncio.get_event_loop") as mock_loop:
+                            mock_loop.return_value.run_in_executor = AsyncMock(
+                                return_value={"final_response": "Processed and replied to sender."}
+                            )
+                            await runner._handle_lattice_notification_background(event)
+
+        mock_adapter.send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_empty_notify_user_sends_nothing(self, tmp_path):
+        """[NOTIFY_USER] with empty body must not call adapter.send."""
+        from gateway.config import GatewayConfig
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        mock_adapter = MagicMock()
+        mock_adapter.send = AsyncMock()
+        runner.adapters[Platform.TELEGRAM] = mock_adapter
+
+        event = self._make_lattice_routed_event()
+
+        with patch("gateway.run._resolve_runtime_agent_kwargs", return_value={"api_key": "k"}):
+            with patch("gateway.run._resolve_gateway_model", return_value="test-model"):
+                with patch.object(runner, "_resolve_turn_agent_config", return_value={"model": "test-model", "runtime": {"api_key": "k"}}):
+                    with patch.object(runner, "_load_reasoning_config", return_value={}):
+                        with patch("asyncio.get_event_loop") as mock_loop:
+                            mock_loop.return_value.run_in_executor = AsyncMock(
+                                return_value={"final_response": "[NOTIFY_USER]\n   "}
+                            )
+                            await runner._handle_lattice_notification_background(event)
+
+        mock_adapter.send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_escalate_reinjects_to_main_thread(self, tmp_path):
+        """[ESCALATE] prefix must re-inject into _handle_message with lattice_routed=False."""
+        from gateway.config import GatewayConfig
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        mock_adapter = MagicMock()
+        mock_adapter.send = AsyncMock()
+        runner.adapters[Platform.TELEGRAM] = mock_adapter
+
+        event = self._make_lattice_routed_event()
+        escalated_events = []
+
+        async def capture_handle_message(ev):
+            escalated_events.append(ev)
+            return None
+
+        runner._handle_message = capture_handle_message
+
+        with patch("gateway.run._resolve_runtime_agent_kwargs", return_value={"api_key": "k"}):
+            with patch("gateway.run._resolve_gateway_model", return_value="test-model"):
+                with patch.object(runner, "_resolve_turn_agent_config", return_value={"model": "test-model", "runtime": {"api_key": "k"}}):
+                    with patch.object(runner, "_load_reasoning_config", return_value={}):
+                        with patch("asyncio.get_event_loop") as mock_loop:
+                            mock_loop.return_value.run_in_executor = AsyncMock(
+                                return_value={"final_response": "[ESCALATE]\nI need permission to delete the deployment"}
+                            )
+                            await runner._handle_lattice_notification_background(event)
+
+        assert len(escalated_events) == 1
+        esc = escalated_events[0]
+        assert esc.source.lattice_routed is False
+        assert "delete the deployment" in esc.text
+
+
 class TestDispatchSseEvent:
     @pytest.mark.asyncio
     async def test_connected_parses_json(self, monkeypatch):
