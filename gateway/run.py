@@ -4114,6 +4114,50 @@ class GatewayRunner:
             else:
                 logger.debug("Lattice notification %s: processed silently", task_id)
 
+            # Always inject a summary note into the main session so the main agent
+            # is aware of background processing when the user next interacts.
+            if hasattr(self, "session_store") and self.session_store is not None:
+                try:
+                    from datetime import datetime as _dt
+                    main_session_key = self._session_key_for_source(source)
+                    self.session_store._ensure_loaded()
+                    main_entry = self.session_store._entries.get(main_session_key)
+                    if main_entry:
+                        if stripped.startswith("[NOTIFY_USER]"):
+                            outcome = "user notified"
+                            agent_summary = stripped[len("[NOTIFY_USER]"):].lstrip("\n").strip()
+                        elif stripped.startswith("[ESCALATE]"):
+                            outcome = "escalated to main thread"
+                            agent_summary = stripped[len("[ESCALATE]"):].lstrip("\n").strip()
+                        else:
+                            outcome = "silent"
+                            agent_summary = stripped.strip()
+                        body_excerpt = body[:120] + ("..." if len(body) > 120 else "")
+                        note_parts = [
+                            "[background notification processed]",
+                            f"Notification: \"{body_excerpt}\"",
+                            f"Outcome: {outcome}",
+                        ]
+                        if agent_summary:
+                            note_parts.append(f"Summary: {agent_summary[:300]}")
+                        self.session_store.append_to_transcript(
+                            main_entry.session_id,
+                            {
+                                "role": "user",
+                                "content": "\n".join(note_parts),
+                                "timestamp": _dt.now().isoformat(),
+                            },
+                        )
+                        logger.debug(
+                            "Lattice notification %s: injected summary into main session %s",
+                            task_id, main_entry.session_id[:16],
+                        )
+                except Exception:
+                    logger.debug(
+                        "Lattice notification %s: failed to inject summary into main session",
+                        task_id, exc_info=True,
+                    )
+
         except Exception:
             logger.exception(
                 "Lattice notification background task %s failed", task_id

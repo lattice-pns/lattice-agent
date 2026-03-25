@@ -379,6 +379,53 @@ class TestLatticeNotificationBackground:
         assert esc.source.lattice_routed is False
         assert "delete the deployment" in esc.text
 
+    @pytest.mark.asyncio
+    async def test_summary_injected_into_main_session(self, tmp_path):
+        """After processing, a summary note is appended to the main session transcript."""
+        from gateway.config import GatewayConfig
+        from gateway.session import SessionStore, SessionEntry
+        from datetime import datetime
+        import uuid as _uuid
+
+        gw_config = GatewayConfig(sessions_dir=tmp_path / "sessions")
+        runner = GatewayRunner(gw_config)
+
+        mock_adapter = MagicMock()
+        mock_adapter.send = AsyncMock()
+        runner.adapters[Platform.TELEGRAM] = mock_adapter
+
+        # Set up a fake session store with a pre-existing main session entry
+        mock_store = MagicMock()
+        mock_store._entries = {}
+        existing_session_id = f"20260101_120000_{_uuid.uuid4().hex[:8]}"
+        mock_entry = MagicMock()
+        mock_entry.session_id = existing_session_id
+        mock_store._entries["agent:main:telegram:dm:999"] = mock_entry
+        mock_store._ensure_loaded = MagicMock()
+        appended = []
+        mock_store.append_to_transcript = MagicMock(side_effect=lambda sid, msg, **kw: appended.append((sid, msg)))
+        runner.session_store = mock_store
+
+        event = self._make_lattice_routed_event()
+
+        with patch("gateway.run._resolve_runtime_agent_kwargs", return_value={"api_key": "k"}):
+            with patch("gateway.run._resolve_gateway_model", return_value="test-model"):
+                with patch.object(runner, "_resolve_turn_agent_config", return_value={"model": "test-model", "runtime": {"api_key": "k"}}):
+                    with patch.object(runner, "_load_reasoning_config", return_value={}):
+                        with patch("asyncio.get_event_loop") as mock_loop:
+                            mock_loop.return_value.run_in_executor = AsyncMock(
+                                return_value={"final_response": "Checked CPU alert; within acceptable range."}
+                            )
+                            await runner._handle_lattice_notification_background(event)
+
+        assert len(appended) == 1
+        sid, note = appended[0]
+        assert sid == existing_session_id
+        assert note["role"] == "user"
+        assert "[background notification processed]" in note["content"]
+        assert "server CPU at 95%" in note["content"]
+        assert "silent" in note["content"]
+
 
 class TestDispatchSseEvent:
     @pytest.mark.asyncio
