@@ -585,8 +585,7 @@ class AIAgent:
         # Context pressure warnings: notify the USER (not the LLM) as context
         # fills up.  Purely informational — displayed in CLI output and sent via
         # status_callback for gateway platforms.  Does NOT inject into messages.
-        self._context_50_warned = False
-        self._context_70_warned = False
+        self._context_pressure_warned = False
 
         # Persistent error log -- always writes WARNING+ to ~/.hermes/logs/errors.log
         # so tool failures, API errors, etc. are inspectable after the fact.
@@ -1013,6 +1012,8 @@ class AIAgent:
         compression_threshold = float(_compression_cfg.get("threshold", 0.50))
         compression_enabled = str(_compression_cfg.get("enabled", True)).lower() in ("true", "1", "yes")
         compression_summary_model = _compression_cfg.get("summary_model") or None
+        compression_target_ratio = float(_compression_cfg.get("target_ratio", 0.20))
+        compression_protect_last = int(_compression_cfg.get("protect_last_n", 20))
 
         # Read explicit context_length override from model config
         _model_cfg = _agent_cfg.get("model", {})
@@ -1051,8 +1052,8 @@ class AIAgent:
             model=self.model,
             threshold_percent=compression_threshold,
             protect_first_n=3,
-            protect_last_n=4,
-            summary_target_tokens=500,
+            protect_last_n=compression_protect_last,
+            summary_target_ratio=compression_target_ratio,
             summary_model_override=compression_summary_model,
             quiet_mode=self.quiet_mode,
             base_url=self.base_url,
@@ -2362,7 +2363,13 @@ class AIAgent:
             prompt_parts.append(skills_prompt)
 
         if not self.skip_context_files:
-            context_files_prompt = build_context_files_prompt(skip_soul=_soul_loaded)
+            # Use TERMINAL_CWD for context file discovery when set (gateway
+            # mode).  The gateway process runs from the hermes-agent install
+            # dir, so os.getcwd() would pick up the repo's AGENTS.md and
+            # other dev files — inflating token usage by ~10k for no benefit.
+            _context_cwd = os.getenv("TERMINAL_CWD") or None
+            context_files_prompt = build_context_files_prompt(
+                cwd=_context_cwd, skip_soul=_soul_loaded)
             if context_files_prompt:
                 prompt_parts.append(context_files_prompt)
 
@@ -4609,12 +4616,11 @@ class AIAgent:
             except Exception as e:
                 logger.debug("Session DB compression split failed: %s", e)
 
-        # Reset context pressure warnings and token estimate — usage drops
+        # Reset context pressure warning and token estimate — usage drops
         # after compaction.  Without this, the stale last_prompt_tokens from
         # the previous API call causes the pressure calculation to stay at
         # >1000% and spam warnings / re-trigger compression in a loop.
-        self._context_50_warned = False
-        self._context_70_warned = False
+        self._context_pressure_warned = False
         _compressed_est = (
             estimate_tokens_rough(new_system_prompt)
             + estimate_messages_tokens_rough(compressed)
@@ -6853,12 +6859,8 @@ class AIAgent:
                     # and fires status_callback for gateway platforms.
                     if _compressor.threshold_tokens > 0:
                         _compaction_progress = _estimated_next_prompt / _compressor.threshold_tokens
-                        if _compaction_progress >= 0.85 and not self._context_70_warned:
-                            self._context_70_warned = True
-                            self._context_50_warned = True  # skip first tier if we jumped past it
-                            self._emit_context_pressure(_compaction_progress, _compressor)
-                        elif _compaction_progress >= 0.60 and not self._context_50_warned:
-                            self._context_50_warned = True
+                        if _compaction_progress >= 0.85 and not self._context_pressure_warned:
+                            self._context_pressure_warned = True
                             self._emit_context_pressure(_compaction_progress, _compressor)
 
                     if self.compression_enabled and _compressor.should_compress(_estimated_next_prompt):

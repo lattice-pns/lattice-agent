@@ -163,8 +163,10 @@ DEFAULT_CONFIG = {
     
     "compression": {
         "enabled": True,
-        "threshold": 0.50,
-        "summary_model": "",  # empty = use main configured model
+        "threshold": 0.50,            # compress when context usage exceeds this ratio
+        "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
+        "protect_last_n": 20,         # minimum recent messages to keep uncompressed
+        "summary_model": "",          # empty = use main configured model
         "summary_provider": "auto",
         "summary_base_url": None,
     },
@@ -1729,6 +1731,8 @@ def show_config():
     print(f"  Enabled:      {'yes' if enabled else 'no'}")
     if enabled:
         print(f"  Threshold:    {compression.get('threshold', 0.50) * 100:.0f}%")
+        print(f"  Target ratio: {compression.get('target_ratio', 0.20) * 100:.0f}% of threshold preserved")
+        print(f"  Protect last: {compression.get('protect_last_n', 20)} messages")
         _sm = compression.get('summary_model', '') or '(main model)'
         print(f"  Model:        {_sm}")
         comp_provider = compression.get('summary_provider', 'auto')
