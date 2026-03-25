@@ -1629,7 +1629,16 @@ class GatewayRunner:
                             "Please try again later!"
                         )
             return None
-        
+
+        # Lattice push notifications are processed autonomously in the background.
+        # They must not interrupt the main conversation or be added to the user's
+        # session history. A separate background agent decides whether to surface
+        # a notification to the user (NOTIFY_USER), escalate to the main thread
+        # for an interactive reply (ESCALATE), or stay silent.
+        if source.lattice_routed:
+            asyncio.create_task(self._handle_lattice_notification_background(event))
+            return None
+
         # PRIORITY handling when an agent is already running for this session.
         # Default behavior is to interrupt immediately so user text/stop messages
         # are handled with minimal latency.
@@ -3925,6 +3934,232 @@ class GatewayRunner:
                 )
             except Exception:
                 pass
+
+    async def _handle_lattice_notification_background(self, event: MessageEvent) -> None:
+        """Process a Lattice push notification autonomously in the background.
+
+        Runs a background agent in a separate ephemeral session (quiet_mode=True).
+        The agent chooses one of three outcomes via response prefix:
+
+          • No prefix          → handled silently, nothing sent to user
+          • [NOTIFY_USER]      → one-way message forwarded to the user's chat
+          • [ESCALATE]         → re-injected into the main conversation thread so
+                                 the user can reply (used when permission is needed)
+        """
+        import uuid
+        from run_agent import AIAgent
+
+        source = event.source
+        adapter = self.adapters.get(source.platform)
+        if not adapter:
+            logger.warning(
+                "Lattice notification: no adapter for platform %s, dropping", source.platform
+            )
+            return
+
+        # Strip the "[incoming push notification ...]" label added by LatticeAdapter
+        # so the agent receives the clean notification body.
+        raw_text = event.text or ""
+        body = raw_text
+        if raw_text.startswith("[") and "\n" in raw_text:
+            body = raw_text.split("\n", 1)[1].strip() or raw_text
+
+        task_id = f"notif-{uuid.uuid4().hex[:12]}"
+
+        _EPHEMERAL_PROMPT = (
+            "You have received an incoming push notification and are processing it "
+            "autonomously in the background. The user is NOT watching this conversation.\n\n"
+            "Your job:\n"
+            "1. Analyse the notification.\n"
+            "2. Use your tools to take any necessary actions (reply to the sender, update "
+            "state, log information, etc.).\n"
+            "3. Choose one of three outcomes for your final response:\n\n"
+            "  \u2022 SILENT (default): You handled everything. Respond normally \u2014 your "
+            "response is discarded. Default to this unless the user truly needs to know.\n\n"
+            "  \u2022 NOTIFY_USER: Send the user a one-way informational message (no reply "
+            "expected). Start your response with exactly:\n"
+            "    [NOTIFY_USER]\n"
+            "    <message for the user>\n\n"
+            "  \u2022 ESCALATE: You need the user\u2019s permission or judgment before acting. "
+            "Hand off to the main conversation thread so the user can reply. Start your "
+            "response with exactly:\n"
+            "    [ESCALATE]\n"
+            "    <context for the user \u2014 what you found, what you were about to do, "
+            "what you need>\n"
+        )
+
+        try:
+            runtime_kwargs = _resolve_runtime_agent_kwargs()
+            if not runtime_kwargs.get("api_key"):
+                logger.warning(
+                    "Lattice notification background: no API key, dropping %s", task_id
+                )
+                return
+
+            model = _resolve_gateway_model()
+
+            # Reuse the same toolset resolution logic as _run_background_task.
+            default_toolset_map = {
+                Platform.LOCAL: "hermes-cli",
+                Platform.TELEGRAM: "hermes-telegram",
+                Platform.DISCORD: "hermes-discord",
+                Platform.WHATSAPP: "hermes-whatsapp",
+                Platform.SLACK: "hermes-slack",
+                Platform.SIGNAL: "hermes-signal",
+                Platform.HOMEASSISTANT: "hermes-homeassistant",
+                Platform.EMAIL: "hermes-email",
+                Platform.DINGTALK: "hermes-dingtalk",
+                Platform.LATTICE: "hermes-lattice",
+            }
+            platform_toolsets_config = {}
+            try:
+                config_path = _hermes_home / "config.yaml"
+                if config_path.exists():
+                    import yaml
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        user_config = yaml.safe_load(f) or {}
+                    platform_toolsets_config = user_config.get("platform_toolsets", {})
+            except Exception:
+                pass
+
+            platform_config_key = {
+                Platform.LOCAL: "cli",
+                Platform.TELEGRAM: "telegram",
+                Platform.DISCORD: "discord",
+                Platform.WHATSAPP: "whatsapp",
+                Platform.SLACK: "slack",
+                Platform.SIGNAL: "signal",
+                Platform.HOMEASSISTANT: "homeassistant",
+                Platform.EMAIL: "email",
+                Platform.DINGTALK: "dingtalk",
+                Platform.LATTICE: "lattice",
+            }.get(source.platform, "telegram")
+
+            config_toolsets = platform_toolsets_config.get(platform_config_key)
+            if config_toolsets and isinstance(config_toolsets, list):
+                enabled_toolsets = config_toolsets
+            else:
+                default_toolset = default_toolset_map.get(source.platform, "hermes-telegram")
+                enabled_toolsets = [default_toolset]
+
+            platform_key = "cli" if source.platform == Platform.LOCAL else source.platform.value
+
+            pr = self._provider_routing
+            max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+            reasoning_config = self._load_reasoning_config()
+            turn_route = self._resolve_turn_agent_config(body, model, runtime_kwargs)
+
+            def run_sync():
+                agent = AIAgent(
+                    model=turn_route["model"],
+                    **turn_route["runtime"],
+                    max_iterations=max_iterations,
+                    quiet_mode=True,
+                    verbose_logging=False,
+                    enabled_toolsets=enabled_toolsets,
+                    reasoning_config=reasoning_config,
+                    providers_allowed=pr.get("only"),
+                    providers_ignored=pr.get("ignore"),
+                    providers_order=pr.get("order"),
+                    provider_sort=pr.get("sort"),
+                    provider_require_parameters=pr.get("require_parameters", False),
+                    provider_data_collection=pr.get("data_collection"),
+                    session_id=task_id,
+                    platform=platform_key,
+                    session_db=self._session_db,
+                    fallback_model=self._fallback_model,
+                    ephemeral_system_prompt=_EPHEMERAL_PROMPT,
+                )
+                return agent.run_conversation(user_message=body, task_id=task_id)
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, run_sync)
+
+            response = (result.get("final_response", "") if result else "") or ""
+            stripped = response.lstrip()
+            _thread_metadata = {"thread_id": source.thread_id} if source.thread_id else None
+
+            if stripped.startswith("[NOTIFY_USER]"):
+                user_message = stripped[len("[NOTIFY_USER]"):].lstrip("\n").strip()
+                if user_message:
+                    await adapter.send(
+                        chat_id=source.chat_id,
+                        content=user_message,
+                        metadata=_thread_metadata,
+                    )
+                    logger.info("Lattice notification %s: user notified", task_id)
+                else:
+                    logger.debug(
+                        "Lattice notification %s: [NOTIFY_USER] prefix present but message empty",
+                        task_id,
+                    )
+
+            elif stripped.startswith("[ESCALATE]"):
+                escalate_body = stripped[len("[ESCALATE]"):].lstrip("\n").strip() or body
+                # Re-inject into the main thread as a normal interactive message.
+                # lattice_routed=False ensures it flows through the full pipeline
+                # (session lookup, agent run, response sent to user).
+                from dataclasses import replace as _dc_replace
+                escalated_source = _dc_replace(event.source, lattice_routed=False)
+                escalated_event = MessageEvent(
+                    text=escalate_body,
+                    message_type=MessageType.TEXT,
+                    source=escalated_source,
+                )
+                logger.info("Lattice notification %s: escalating to main thread", task_id)
+                await self._handle_message(escalated_event)
+
+            else:
+                logger.debug("Lattice notification %s: processed silently", task_id)
+
+            # Always inject a summary note into the main session so the main agent
+            # is aware of background processing when the user next interacts.
+            if hasattr(self, "session_store") and self.session_store is not None:
+                try:
+                    from datetime import datetime as _dt
+                    main_session_key = self._session_key_for_source(source)
+                    self.session_store._ensure_loaded()
+                    main_entry = self.session_store._entries.get(main_session_key)
+                    if main_entry:
+                        if stripped.startswith("[NOTIFY_USER]"):
+                            outcome = "user notified"
+                            agent_summary = stripped[len("[NOTIFY_USER]"):].lstrip("\n").strip()
+                        elif stripped.startswith("[ESCALATE]"):
+                            outcome = "escalated to main thread"
+                            agent_summary = stripped[len("[ESCALATE]"):].lstrip("\n").strip()
+                        else:
+                            outcome = "silent"
+                            agent_summary = stripped.strip()
+                        body_excerpt = body[:120] + ("..." if len(body) > 120 else "")
+                        note_parts = [
+                            "[background notification processed]",
+                            f"Notification: \"{body_excerpt}\"",
+                            f"Outcome: {outcome}",
+                        ]
+                        if agent_summary:
+                            note_parts.append(f"Summary: {agent_summary[:300]}")
+                        self.session_store.append_to_transcript(
+                            main_entry.session_id,
+                            {
+                                "role": "user",
+                                "content": "\n".join(note_parts),
+                                "timestamp": _dt.now().isoformat(),
+                            },
+                        )
+                        logger.debug(
+                            "Lattice notification %s: injected summary into main session %s",
+                            task_id, main_entry.session_id[:16],
+                        )
+                except Exception:
+                    logger.debug(
+                        "Lattice notification %s: failed to inject summary into main session",
+                        task_id, exc_info=True,
+                    )
+
+        except Exception:
+            logger.exception(
+                "Lattice notification background task %s failed", task_id
+            )
 
     async def _handle_reasoning_command(self, event: MessageEvent) -> str:
         """Handle /reasoning command — manage reasoning effort and display toggle.
