@@ -211,7 +211,7 @@ def lattice_session_search(
     Delegates to the session_search machinery but pins source_filter to ["lattice"]
     so only lattice-platform sessions are returned.
     """
-    logger.debug("lattice_session_search called: query=%r limit=%d db=%s", query, limit, type(db).__name__)
+    logger.info("lattice_session_search called: query=%r limit=%d db=%s", query, limit, type(db).__name__)
     if db is None:
         logger.warning("lattice_session_search: session DB is None — was GatewayRunner._session_db initialized?")
         return json.dumps(
@@ -242,14 +242,14 @@ def lattice_session_search(
             results = self._inner.list_sessions_rich(
                 source="lattice", limit=limit, offset=offset
             )
-            logger.debug("lattice_session_search: list_sessions_rich returned %d sessions", len(results))
+            logger.info("lattice_session_search: list_sessions_rich returned %d sessions", len(results))
             return results
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
     scoped_db = _LatticeScopedDB(db)
-    logger.debug("lattice_session_search: delegating to session_search (query=%r)", query or "")
+    logger.info("lattice_session_search: delegating to session_search (query=%r)", query or "")
     return _session_search(
         query=query or "",
         role_filter=None,
