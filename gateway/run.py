@@ -2354,20 +2354,40 @@ class GatewayRunner:
                     context_prompt += f"\n\n{vc_context}"
 
         if source.platform == Platform.LATTICE:
-            context_prompt += (
-                "\n\n[System note: You are processing an incoming Lattice "
-                "notification autonomously. It may be either a direct notification or a "
-                "message originating from another agent. The user is NOT watching this "
-                "conversation.\n\n"
-                "Guidelines:\n"
+            _notifications_path = _hermes_home / "notifications.md"
+            _notifications_content = (
+                _notifications_path.read_text() if _notifications_path.exists() else None
+            )
+            _default_notification_policy = (
+                "# Notification policy\n\n"
+                "## Guidelines\n"
                 "- Analyse the notification and take any necessary actions using your tools.\n"
                 "- Default to silent handling. Do not send any outbound message unless there "
                 "is a clear reason.\n"
                 "- If the notification can be handled locally, do so silently and stop once "
                 "the requested work is complete.\n"
                 "- Use `lattice_notify_user` only if human input, permission, or urgent "
-                "awareness is required.\n"
-                "- Your final response text is stored in the session transcript but is NOT "
+                "awareness is required."
+            )
+            if _notifications_content is not None:
+                _policy_section = (
+                    f"Notification policy (from ~/.hermes/notifications.md):\n"
+                    f"{_notifications_content.strip()}"
+                )
+            else:
+                _policy_section = (
+                    f"{_default_notification_policy}\n\n"
+                    f"[notifications.md does not exist yet. On your first opportunity, "
+                    f"create ~/.hermes/notifications.md with the default policy above "
+                    f"using your file tools. You may update it over time as you learn "
+                    f"the user's preferences.]"
+                )
+            context_prompt += (
+                "\n\n[System note: You are processing an incoming Lattice "
+                "notification autonomously. It may be either a direct notification or a "
+                "message originating from another agent. The user is NOT watching this "
+                f"conversation.\n\n{_policy_section}\n\n"
+                "Your final response text is stored in the session transcript but is NOT "
                 "delivered anywhere. Use the tools above only when outbound communication is "
                 "actually necessary.]"
             )
