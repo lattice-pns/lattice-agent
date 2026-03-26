@@ -178,18 +178,16 @@ async def _summarize_session(
                 return None
 
 
-def _list_recent_sessions(
-    db,
-    limit: int,
-    current_session_id: str = None,
-    source_filter: Optional[List[str]] = None,
-) -> str:
+# Sources that are excluded from session browsing/searching by default.
+# Third-party integrations (Paperclip agents, etc.) tag their sessions with
+# HERMES_SESSION_SOURCE=tool so they don't clutter the user's session history.
+_HIDDEN_SESSION_SOURCES = ("tool",)
+
+
+def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
     """Return metadata for the most recent sessions (no LLM calls)."""
     try:
-        list_kw: Dict[str, Any] = {"limit": limit + 5}
-        if source_filter:
-            list_kw["source"] = source_filter[0]
-        sessions = db.list_sessions_rich(**list_kw)  # fetch extra to skip current
+        sessions = db.list_sessions_rich(limit=limit + 5, exclude_sources=list(_HIDDEN_SESSION_SOURCES))  # fetch extra to skip current
 
         # Resolve current session lineage to exclude it
         current_root = None
@@ -264,7 +262,7 @@ def session_search(
     # Recent sessions mode: when query is empty, return metadata for recent sessions.
     # No LLM calls — just DB queries for titles, previews, timestamps.
     if not query or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id, source_filter)
+        return _list_recent_sessions(db, limit, current_session_id)
 
     query = query.strip()
 
@@ -279,6 +277,7 @@ def session_search(
             query=query,
             source_filter=source_filter,
             role_filter=role_list,
+            exclude_sources=list(_HIDDEN_SESSION_SOURCES),
             limit=50,  # Get more matches to find unique sessions
             offset=0,
         )

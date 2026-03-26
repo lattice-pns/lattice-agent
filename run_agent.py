@@ -885,7 +885,7 @@ class AIAgent:
                 if existing_session is None:
                     self._session_db.create_session(
                         session_id=self.session_id,
-                        source=self.platform or "cli",
+                        source=self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
                         model=self.model,
                         model_config={
                             "max_iterations": self.max_iterations,
@@ -900,8 +900,15 @@ class AIAgent:
                         self.session_id,
                     )
             except Exception as e:
-                logger.warning("Session DB create_session failed — messages will NOT be indexed: %s", e)
-                self._session_db = None  # prevent silent data loss on every subsequent flush
+                # Transient SQLite lock contention (e.g. CLI and gateway writing
+                # concurrently) must NOT permanently disable session_search for
+                # this agent.  Keep _session_db alive — subsequent message
+                # flushes and session_search calls will still work once the
+                # lock clears.  The session row may be missing from the index
+                # for this run, but that is recoverable (flushes upsert rows).
+                logger.warning(
+                    "Session DB create_session failed (session_search still available): %s", e
+                )
         
         # In-memory todo list for task planning (one per agent/session)
         from tools.todo_tool import TodoStore
@@ -1585,6 +1592,14 @@ class AIAgent:
             return
         self._apply_persist_user_message_override(messages)
         try:
+            # If create_session() failed at startup (e.g. transient lock), the
+            # session row may not exist yet.  ensure_session() uses INSERT OR
+            # IGNORE so it is a no-op when the row is already there.
+            self._session_db.ensure_session(
+                self.session_id,
+                source=self.platform or "cli",
+                model=self.model,
+            )
             start_idx = len(conversation_history) if conversation_history else 0
             flush_from = max(start_idx, self._last_flushed_db_idx)
             for msg in messages[flush_from:]:
@@ -2266,7 +2281,7 @@ class AIAgent:
                 return
             try:
                 manager.flush_all()
-            except Exception as exc:
+            except (Exception, KeyboardInterrupt) as exc:
                 logger.debug("Honcho flush on exit failed (non-fatal): %s", exc)
 
         atexit.register(_flush_honcho_on_exit)
@@ -4851,7 +4866,7 @@ class AIAgent:
                 self.session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
                 self._session_db.create_session(
                     session_id=self.session_id,
-                    source=self.platform or "cli",
+                    source=self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
                     model=self.model,
                     parent_session_id=old_session_id,
                 )
