@@ -52,6 +52,19 @@ class TestLatticeSessionSearch:
         _, kwargs = calls[0]
         assert kwargs.get("source_filter") == ["lattice"] or calls[0][0][1] == ["lattice"]
 
+    def test_recent_mode_scoped_to_lattice_source(self):
+        """No-query (recent) mode must call list_sessions_rich with source='lattice'."""
+        from tools.lattice_tool import lattice_session_search
+
+        mock_db = MagicMock()
+        mock_db.list_sessions_rich.return_value = []
+
+        lattice_session_search(query="", db=mock_db)
+
+        mock_db.list_sessions_rich.assert_called_once()
+        _, kwargs = mock_db.list_sessions_rich.call_args
+        assert kwargs.get("source") == "lattice"
+
     def test_schema_name(self):
         from tools.lattice_tool import LATTICE_SESSION_SEARCH_SCHEMA
         assert LATTICE_SESSION_SEARCH_SCHEMA["name"] == "lattice_session_search"

@@ -220,7 +220,7 @@ def lattice_session_search(
     from tools.session_search_tool import session_search as _session_search
 
     class _LatticeScopedDB:
-        """Thin proxy that forces source_filter=["lattice"] on search_messages calls."""
+        """Thin proxy that scopes all session queries to source="lattice"."""
 
         def __init__(self, inner):
             self._inner = inner
@@ -234,6 +234,11 @@ def lattice_session_search(
                 role_filter=role_filter,
                 limit=limit,
                 offset=offset,
+            )
+
+        def list_sessions_rich(self, source=None, limit=20, offset=0):
+            return self._inner.list_sessions_rich(
+                source="lattice", limit=limit, offset=offset
             )
 
         def __getattr__(self, name):
