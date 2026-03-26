@@ -881,17 +881,24 @@ class AIAgent:
         self._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
         if self._session_db:
             try:
-                self._session_db.create_session(
-                    session_id=self.session_id,
-                    source=self.platform or "cli",
-                    model=self.model,
-                    model_config={
-                        "max_iterations": self.max_iterations,
-                        "reasoning_config": reasoning_config,
-                        "max_tokens": max_tokens,
-                    },
-                    user_id=None,
-                )
+                existing_session = self._session_db.get_session(self.session_id)
+                if existing_session is None:
+                    self._session_db.create_session(
+                        session_id=self.session_id,
+                        source=self.platform or "cli",
+                        model=self.model,
+                        model_config={
+                            "max_iterations": self.max_iterations,
+                            "reasoning_config": reasoning_config,
+                            "max_tokens": max_tokens,
+                        },
+                        user_id=None,
+                    )
+                else:
+                    logger.debug(
+                        "Session DB already has session %s; reusing existing row",
+                        self.session_id,
+                    )
             except Exception as e:
                 logger.warning("Session DB create_session failed — messages will NOT be indexed: %s", e)
                 self._session_db = None  # prevent silent data loss on every subsequent flush

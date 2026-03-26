@@ -80,6 +80,38 @@ class TestAgentConfigSignature:
 class TestAgentCacheLifecycle:
     """End-to-end cache behavior with real AIAgent construction."""
 
+    def test_existing_gateway_session_keeps_session_db(self, tmp_path):
+        """Gateway pre-creates the DB row; agent init must reuse it."""
+        from hermes_state import SessionDB
+        from run_agent import AIAgent
+
+        db = SessionDB(db_path=tmp_path / "state.db")
+        try:
+            db.create_session(
+                session_id="gateway_session_123",
+                source="lattice",
+                user_id="agent_abc",
+            )
+
+            agent = AIAgent(
+                model="anthropic/claude-sonnet-4",
+                api_key="test",
+                base_url="https://openrouter.ai/api/v1",
+                provider="openrouter",
+                max_iterations=5,
+                quiet_mode=True,
+                skip_context_files=True,
+                skip_memory=True,
+                platform="lattice",
+                session_id="gateway_session_123",
+                session_db=db,
+            )
+
+            assert agent._session_db is db
+            assert db.get_session("gateway_session_123") is not None
+        finally:
+            db.close()
+
     def test_cache_hit_returns_same_agent(self):
         """Second message with same config reuses the cached agent instance."""
         from run_agent import AIAgent
