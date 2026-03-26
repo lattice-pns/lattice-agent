@@ -292,16 +292,11 @@ class LatticeAdapter(BasePlatformAdapter):
         logger.info("Lattice: notification raw keys=%s", list(data.keys()))
 
         body = data.get("body", "")
-        sender = (data.get("from") or "").strip()  # optional sender pubkey hex
+        sender = (data.get("from") or "").strip()
 
         text = body or "(empty notification)"
-
-        # Bracket label frames this as a Lattice push (not plain user input).
-        inner = "incoming push notification"
         if sender:
-            inner += f" from agent {sender}"
-        label = f"[{inner}]"
-        text = f"{label}\n{text}"
+            text = f"[from agent {sender}]\n{text}"
 
         # Lattice always routes to the main platform — session_target is required.
         session_target = (self.config.extra or {}).get("session_target")

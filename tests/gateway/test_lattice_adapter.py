@@ -191,9 +191,9 @@ class TestLatticeAdapterNotifications:
         event = target_handle.await_args.args[0]
         assert isinstance(event, MessageEvent)
         assert event.message_type == MessageType.TEXT
-        assert "incoming push notification" in event.text
-        assert "bb" * 32 in event.text
-        assert "ping" in event.text
+        pk = "bb" * 32
+        assert event.text == f"[from agent {pk}]\nping"
+        assert event.raw_message.get("from") == pk
         assert event.source.lattice_routed is True
         assert event.source.user_id is None
         assert event.source.chat_type == "dm"
@@ -216,6 +216,8 @@ class TestLatticeAdapterNotifications:
         await adapter._process_notification(json.dumps({"body": "only"}))
 
         handler.assert_awaited_once()
+        routed = handler.await_args.args[0]
+        assert routed.text == "only"
 
 
 class TestLatticeNotificationBackground:
@@ -230,7 +232,7 @@ class TestLatticeNotificationBackground:
             lattice_routed=True,
         )
         return MessageEvent(
-            text="[incoming push notification]\nserver CPU at 95%",
+            text="server CPU at 95%",
             message_type=MessageType.TEXT,
             source=source,
         )

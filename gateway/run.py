@@ -3800,12 +3800,7 @@ class GatewayRunner:
             )
             return
 
-        # Strip the "[incoming push notification ...]" label added by LatticeAdapter
-        # so the agent receives the clean notification body.
-        raw_text = event.text or ""
-        body = raw_text
-        if raw_text.startswith("[") and "\n" in raw_text:
-            body = raw_text.split("\n", 1)[1].strip() or raw_text
+        body = event.text
 
         task_id = f"notif-{uuid.uuid4().hex[:12]}"
 
