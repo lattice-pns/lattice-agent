@@ -231,6 +231,13 @@ def check_lattice_requirements() -> bool:
         return bool(os.getenv("LATTICE_URL"))
 
 
+def check_lattice_send_requirements() -> bool:
+    """Allow lattice_send everywhere except active Lattice platform sessions."""
+    if os.getenv("HERMES_SESSION_PLATFORM", "") == "lattice":
+        return False
+    return check_lattice_requirements()
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 registry.register(
@@ -238,7 +245,7 @@ registry.register(
     toolset="lattice",
     schema=LATTICE_SEND_SCHEMA,
     handler=lattice_send_tool,
-    check_fn=check_lattice_requirements,
+    check_fn=check_lattice_send_requirements,
     is_async=True,
     emoji="🔗",
 )

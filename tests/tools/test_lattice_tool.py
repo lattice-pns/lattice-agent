@@ -7,6 +7,7 @@ import pytest
 
 from tools.lattice_tool import (
     check_lattice_requirements,
+    check_lattice_send_requirements,
     lattice_get_pubkey_tool,
     lattice_send_tool,
 )
@@ -23,6 +24,18 @@ class TestCheckLatticeRequirements:
     def test_false_when_unset(self, monkeypatch):
         monkeypatch.delenv("LATTICE_URL", raising=False)
         assert check_lattice_requirements() is False
+
+
+class TestCheckLatticeSendRequirements:
+    def test_false_during_lattice_sessions(self, monkeypatch):
+        monkeypatch.setenv("LATTICE_URL", "https://example.com")
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "lattice")
+        assert check_lattice_send_requirements() is False
+
+    def test_true_on_other_platforms_when_configured(self, monkeypatch):
+        monkeypatch.setenv("LATTICE_URL", "https://example.com")
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
+        assert check_lattice_send_requirements() is True
 
 
 class TestLatticeSendTool:
