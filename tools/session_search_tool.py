@@ -184,10 +184,26 @@ async def _summarize_session(
 _HIDDEN_SESSION_SOURCES = ("tool",)
 
 
-def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
+def _list_recent_sessions(
+    db,
+    limit: int,
+    current_session_id: str = None,
+    source_filter: Optional[List[str]] = None,
+) -> str:
     """Return metadata for the most recent sessions (no LLM calls)."""
     try:
-        sessions = db.list_sessions_rich(limit=limit + 5, exclude_sources=list(_HIDDEN_SESSION_SOURCES))  # fetch extra to skip current
+        # Use DB-side source scoping when a single platform is requested, and
+        # keep a Python-side filter so multi-source callers still behave
+        # correctly even though list_sessions_rich only accepts one source.
+        source = source_filter[0] if source_filter and len(source_filter) == 1 else None
+        sessions = db.list_sessions_rich(
+            source=source,
+            limit=limit + 5,
+            exclude_sources=list(_HIDDEN_SESSION_SOURCES),
+        )  # fetch extra to skip current
+        if source_filter:
+            allowed_sources = set(source_filter)
+            sessions = [s for s in sessions if s.get("source") in allowed_sources]
 
         # Resolve current session lineage to exclude it
         current_root = None
@@ -262,7 +278,7 @@ def session_search(
     # Recent sessions mode: when query is empty, return metadata for recent sessions.
     # No LLM calls — just DB queries for titles, previews, timestamps.
     if not query or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id)
+        return _list_recent_sessions(db, limit, current_session_id, source_filter)
 
     query = query.strip()
 
