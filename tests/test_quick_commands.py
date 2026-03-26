@@ -125,9 +125,6 @@ class TestGatewayQuickCommands:
         event.source.platform.value = "telegram"
         event.source.chat_type = "dm"
         event.source.chat_id = "123"
-        # Must be explicit: MagicMock().lattice_routed is truthy and would
-        # short-circuit _handle_message before quick commands (lattice path).
-        event.source.lattice_routed = False
         return event
 
     @pytest.mark.asyncio

@@ -278,7 +278,6 @@ class TestSignalAuthorization:
         source = MagicMock()
         source.platform = Platform.SIGNAL
         source.user_id = "+15559999999"
-        source.lattice_routed = False
 
         # No allowlists set — should check GATEWAY_ALLOW_ALL_USERS
         with patch.dict("os.environ", {}, clear=True):
