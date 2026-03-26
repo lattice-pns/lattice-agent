@@ -163,7 +163,6 @@ def _discover_tools():
         "tools.homeassistant_tool",
         "tools.lattice_tool",
         "tools.lattice_notify_user_tool",
-        "tools.lattice_session_search_tool",
     ]
     import importlib
     for mod_name in _modules:
