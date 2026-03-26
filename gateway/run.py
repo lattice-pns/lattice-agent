@@ -3992,6 +3992,20 @@ class GatewayRunner:
                                 "timestamp": _dt.now().isoformat(),
                             },
                         )
+                        # Inject a paired assistant acknowledgment so the transcript
+                        # maintains proper user→assistant turn alternation.  Without
+                        # this, the injected user note sits back-to-back with the
+                        # next real user message, causing the LLM to try to handle
+                        # both simultaneously (e.g. searching for notification
+                        # content while also responding to the real request).
+                        self.session_store.append_to_transcript(
+                            main_entry.session_id,
+                            {
+                                "role": "assistant",
+                                "content": "[Background notification noted.]",
+                                "timestamp": _dt.now().isoformat(),
+                            },
+                        )
                         logger.debug(
                             "Lattice notification %s: injected summary into main session %s",
                             task_id, main_entry.session_id[:16],
