@@ -54,7 +54,7 @@ def _check_lattice_notify_user() -> bool:
 
 def lattice_notify_user_tool(args: dict, **kwargs) -> str:
     """Send a notification to the user on the configured session_target platform."""
-    message = (args.get("message") or "").strip()
+    message = f"[incoming notification]\n{args.get('message', '')}"
     if not message:
         return json.dumps({"error": "message is required"}, ensure_ascii=False)
 
