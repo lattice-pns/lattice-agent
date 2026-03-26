@@ -18,6 +18,10 @@ from typing import Any, Dict, Optional
 
 from tools.lattice_auth import get_post_auth_headers
 from tools.registry import registry
+from tools.session_search_tool import (
+    check_session_search_requirements as check_lattice_session_search_requirements,
+    session_search as _session_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,13 +116,7 @@ async def lattice_send_tool(args: Dict[str, Any], **kwargs) -> str:
                 return json.dumps({"error": "Agent not connected"})
             if resp.status_code == 401:
                 pubkey_hex = headers["X-Agent-Pubkey"]
-                logger.warning(
-                    "Lattice 401: pubkey=%s...%s timestamp=%s body=%r",
-                    pubkey_hex[:8],
-                    pubkey_hex[-8:],
-                    headers["X-Timestamp"],
-                    body_str,
-                )
+
             resp.raise_for_status()
             return json.dumps({"success": True})
     except httpx.HTTPStatusError as e:
@@ -189,16 +187,6 @@ LATTICE_SESSION_SEARCH_SCHEMA = {
 }
 
 
-def check_lattice_session_search_requirements() -> bool:
-    """Available on all platforms when the DB exists."""
-    try:
-        from hermes_state import DEFAULT_DB_PATH
-
-        return DEFAULT_DB_PATH.parent.exists()
-    except ImportError:
-        return False
-
-
 def lattice_session_search(
     query: str,
     limit: int = 3,
@@ -211,51 +199,22 @@ def lattice_session_search(
     Delegates to the session_search machinery but pins source_filter to ["lattice"]
     so only lattice-platform sessions are returned.
     """
-    logger.info("lattice_session_search called: query=%r limit=%d db=%s", query, limit, type(db).__name__)
     if db is None:
-        logger.warning("lattice_session_search: session DB is None — was GatewayRunner._session_db initialized?")
+        logger.debug(
+            "lattice_session_search: session DB is None — was GatewayRunner._session_db initialized?"
+        )
         return json.dumps(
             {"success": False, "error": "Session database not available."},
             ensure_ascii=False,
         )
 
-    from tools.session_search_tool import session_search as _session_search
-
-    class _LatticeScopedDB:
-        """Thin proxy that scopes all session queries to source="lattice"."""
-
-        def __init__(self, inner):
-            self._inner = inner
-
-        def search_messages(
-            self, query, source_filter=None, role_filter=None, limit=20, offset=0
-        ):
-            return self._inner.search_messages(
-                query=query,
-                source_filter=["lattice"],
-                role_filter=role_filter,
-                limit=limit,
-                offset=offset,
-            )
-
-        def list_sessions_rich(self, source=None, limit=20, offset=0):
-            results = self._inner.list_sessions_rich(
-                source="lattice", limit=limit, offset=offset
-            )
-            logger.info("lattice_session_search: list_sessions_rich returned %d sessions", len(results))
-            return results
-
-        def __getattr__(self, name):
-            return getattr(self._inner, name)
-
-    scoped_db = _LatticeScopedDB(db)
-    logger.info("lattice_session_search: delegating to session_search (query=%r)", query or "")
     return _session_search(
         query=query or "",
         role_filter=None,
         limit=limit,
-        db=scoped_db,
+        db=db,
         current_session_id=current_session_id,
+        source_filter=["lattice"],
     )
 
 

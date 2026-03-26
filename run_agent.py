@@ -4924,7 +4924,6 @@ class AIAgent:
                 current_session_id=self.session_id,
             )
         elif function_name == "lattice_session_search":
-            logger.info("lattice_session_search dispatch: session_db=%s", type(self._session_db).__name__)
             if not self._session_db:
                 return json.dumps({"success": False, "error": "Session database not available."})
             from tools.lattice_tool import lattice_session_search as _lattice_ss
@@ -5266,7 +5265,6 @@ class AIAgent:
                 if self.quiet_mode:
                     self._vprint(f"  {_get_cute_tool_message_impl('session_search', function_args, tool_duration, result=function_result)}")
             elif function_name == "lattice_session_search":
-                logger.info("lattice_session_search dispatch (seq): session_db=%s", type(self._session_db).__name__)
                 if not self._session_db:
                     function_result = json.dumps({"success": False, "error": "Session database not available."})
                 else:

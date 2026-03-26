@@ -391,7 +391,7 @@ class GatewayRunner:
             self._session_db = SessionDB()
             logger.info("Session DB initialized OK")
         except Exception as e:
-            logger.warning("SQLite session store not available: %s", e)
+            logger.debug("SQLite session store not available: %s", e)
         
         # DM pairing store for code-based user authorization
         from gateway.pairing import PairingStore
