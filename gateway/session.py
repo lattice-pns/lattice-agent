@@ -90,9 +90,6 @@ class SessionSource:
     chat_topic: Optional[str] = None  # Channel topic/description (Discord, Slack)
     user_id_alt: Optional[str] = None  # Signal UUID (alternative to phone number)
     chat_id_alt: Optional[str] = None  # Signal group internal ID
-    # True when the message was injected by Lattice SSE routing into session_target
-    # (already authenticated via Ed25519 on the Lattice connection).
-    lattice_routed: bool = False
 
     @property
     def description(self) -> str:
@@ -130,10 +127,8 @@ class SessionSource:
             d["user_id_alt"] = self.user_id_alt
         if self.chat_id_alt:
             d["chat_id_alt"] = self.chat_id_alt
-        if self.lattice_routed:
-            d["lattice_routed"] = True
         return d
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionSource":
         return cls(
@@ -147,7 +142,6 @@ class SessionSource:
             chat_topic=data.get("chat_topic"),
             user_id_alt=data.get("user_id_alt"),
             chat_id_alt=data.get("chat_id_alt"),
-            lattice_routed=bool(data.get("lattice_routed")),
         )
     
     @classmethod
