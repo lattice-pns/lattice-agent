@@ -2,18 +2,17 @@
 Lattice platform adapter.
 
 Connects to a Lattice push notification server via SSE.
-Inbound notifications are routed through the gateway message handler,
-which will call agent.interrupt() if an agent is running or start a new conversation.
+Inbound notifications are routed through the gateway message handler as
+first-class LATTICE platform sessions.
 
 Configuration:
 - LATTICE_URL env var (optional; defaults to https://pns.1lattice.co)
 - LATTICE_PRIVATE_KEY_HEX (optional; auto-generated and persisted on first run)
+- session_target in config.yaml extra (required by the lattice_notify_user tool to
+  identify the human's main platform chat)
 
-Session routing:
-- Lattice never uses its own session — messages always route to the main platform
-  (first connected platform with home channel or allowlist user).
-
-SSE notification JSON may include optional field `from` (sender pubkey hex).
+SSE notification JSON may include optional field `from` (sender pubkey hex),
+used as the session chat_id so each sender agent gets its own session thread.
 
 Lattice auth: Ed25519 keypair. Sign payload ";{unix_timestamp}" for GET requests.
 """
@@ -34,7 +33,7 @@ from gateway.platforms.base import (
     SendResult,
 )
 from gateway.session import SessionSource
-from tools.lattice_auth import get_auth_headers, get_post_auth_headers
+from tools.lattice_auth import get_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +135,6 @@ class LatticeAdapter(BasePlatformAdapter):
         self.client: httpx.AsyncClient | None = None
         self._sse_task: asyncio.Task | None = None
         self._running = False
-        self.gateway_runner = None  # Injected by gateway for cross-platform delivery
         self._last_event_id: str = ""
 
         logger.info("Lattice adapter initialized: url=%s", self._lattice_url)
@@ -298,37 +296,17 @@ class LatticeAdapter(BasePlatformAdapter):
         if sender:
             text = f"[from agent {sender}]\n{text}"
 
-        # Lattice always routes to the main platform — session_target is required.
-        session_target = (self.config.extra or {}).get("session_target")
-        if (
-            not isinstance(session_target, dict)
-            or not session_target.get("platform")
-            or not session_target.get("chat_id")
-        ):
-            logger.error(
-                "Lattice: session_target not configured, dropping notification"
-            )
-            return
-        try:
-            target_platform = Platform(session_target["platform"])
-            target_chat_id = str(session_target["chat_id"])
-        except ValueError:
-            logger.error(
-                "Lattice: invalid session_target platform %r",
-                session_target.get("platform"),
-            )
-            return
+        # Each sender agent gets its own LATTICE session keyed by their pubkey.
+        chat_id = sender if sender else "lattice"
         source = SessionSource(
-            platform=target_platform,
-            chat_id=target_chat_id,
+            platform=Platform.LATTICE,
+            chat_id=chat_id,
             chat_type="dm",
-            user_id=None,
-            lattice_routed=True,
+            user_id=sender if sender else None,
         )
         logger.debug(
-            "Lattice: routing notification to session %s:%s",
-            target_platform.value,
-            target_chat_id[:16] + "..." if len(target_chat_id) > 16 else target_chat_id,
+            "Lattice: dispatching notification from %s",
+            (chat_id[:16] + "...") if len(chat_id) > 16 else chat_id,
         )
         event = MessageEvent(
             text=text,
@@ -337,23 +315,10 @@ class LatticeAdapter(BasePlatformAdapter):
             raw_message=data,
         )
 
-        # Route through the target platform's handle_message so the response is
-        # sent back to the main thread (typing, media extraction, etc. like Telegram).
-        if self.gateway_runner:
-            target_adapter = self.gateway_runner.adapters.get(target_platform)
-            if target_adapter and hasattr(target_adapter, "handle_message"):
-                await target_adapter.handle_message(event)
-            else:
-                logger.warning(
-                    "Lattice: target adapter %s not available, dropping notification",
-                    target_platform.value,
-                )
-        elif self._message_handler:
+        if self._message_handler:
             await self._message_handler(event)
         else:
-            logger.warning(
-                "Lattice: no gateway_runner or message handler, dropping notification"
-            )
+            logger.warning("Lattice: no message handler, dropping notification")
 
     async def send(
         self,
@@ -362,37 +327,12 @@ class LatticeAdapter(BasePlatformAdapter):
         reply_to: str | None = None,
         metadata: dict | None = None,
     ) -> SendResult:
-        """Send a message to another agent via Lattice /send endpoint."""
-        if not self.client:
-            return SendResult(success=False, error="Not connected")
-
-        body = {"to": chat_id, "body": content}
-        body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
-        body_bytes = body_str.encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            **get_post_auth_headers(self._privkey_hex, body_str),
-        }
-        try:
-            resp = await self.client.post(
-                f"{self._lattice_url}/send", content=body_bytes, headers=headers
-            )
-            if resp.status_code == 404:
-                return SendResult(success=False, error="Agent not connected")
-            if resp.status_code == 401:
-                pubkey_hex = headers.get("X-Agent-Pubkey", "")
-                logger.warning(
-                    "Lattice 401: pubkey=%s...%s to=%s body=%r",
-                    pubkey_hex[:8],
-                    pubkey_hex[-8:],
-                    chat_id[:16],
-                    body_str,
-                )
-            resp.raise_for_status()
-            return SendResult(success=True)
-        except Exception as e:
-            logger.warning("Lattice send failed: %s", e)
-            return SendResult(success=False, error=str(e))
+        """No-op: the gateway calls this with the agent's final response, but we
+        don't echo it back to the sender — that would create an infinite loop.
+        Agents that intentionally want to reply to another agent should use the
+        lattice_send tool directly.
+        """
+        return SendResult(success=True)
 
     async def get_chat_info(self, chat_id: str) -> dict:
         """Return minimal chat info."""

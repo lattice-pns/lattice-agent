@@ -178,10 +178,18 @@ async def _summarize_session(
                 return None
 
 
-def _list_recent_sessions(db, limit: int, current_session_id: str = None) -> str:
+def _list_recent_sessions(
+    db,
+    limit: int,
+    current_session_id: str = None,
+    source_filter: Optional[List[str]] = None,
+) -> str:
     """Return metadata for the most recent sessions (no LLM calls)."""
     try:
-        sessions = db.list_sessions_rich(limit=limit + 5)  # fetch extra to skip current
+        list_kw: Dict[str, Any] = {"limit": limit + 5}
+        if source_filter:
+            list_kw["source"] = source_filter[0]
+        sessions = db.list_sessions_rich(**list_kw)  # fetch extra to skip current
 
         # Resolve current session lineage to exclude it
         current_root = None
@@ -236,12 +244,17 @@ def session_search(
     limit: int = 3,
     db=None,
     current_session_id: str = None,
+    source_filter: Optional[List[str]] = None,
 ) -> str:
     """
     Search past sessions and return focused summaries of matching conversations.
 
     Uses FTS5 to find matches, then summarizes the top sessions with Gemini Flash.
     The current session is excluded from results since the agent already has that context.
+
+    Optional source_filter restricts FTS and recent-session listing to those platform
+    sources (e.g. ``["lattice"]`` for lattice_session_search). Not exposed on the
+    session_search tool schema — callers pass it in code.
     """
     if db is None:
         return json.dumps({"success": False, "error": "Session database not available."}, ensure_ascii=False)
@@ -251,7 +264,7 @@ def session_search(
     # Recent sessions mode: when query is empty, return metadata for recent sessions.
     # No LLM calls — just DB queries for titles, previews, timestamps.
     if not query or not query.strip():
-        return _list_recent_sessions(db, limit, current_session_id)
+        return _list_recent_sessions(db, limit, current_session_id, source_filter)
 
     query = query.strip()
 
@@ -264,6 +277,7 @@ def session_search(
         # FTS5 search -- get matches ranked by relevance
         raw_results = db.search_messages(
             query=query,
+            source_filter=source_filter,
             role_filter=role_list,
             limit=50,  # Get more matches to find unique sessions
             offset=0,
