@@ -3955,27 +3955,35 @@ class GatewayRunner:
             if hasattr(self, "session_store") and self.session_store is not None:
                 try:
                     from datetime import datetime as _dt
-                    main_session_key = self._session_key_for_source(source)
-                    self.session_store._ensure_loaded()
-                    main_entry = self.session_store._entries.get(main_session_key)
+                    main_entry = self.session_store.get_or_create_session(source)
                     if main_entry:
                         if stripped.startswith("[NOTIFY_USER]"):
-                            outcome = "user notified"
                             agent_summary = stripped[len("[NOTIFY_USER]"):].lstrip("\n").strip()
+                            note_parts = [
+                                "[background notification processed — user already notified]",
+                                f"Notification received: \"{body}\"",
+                                "Action taken: A one-way message was sent to the user. Do not re-send it.",
+                            ]
+                            if agent_summary:
+                                note_parts.append(f"Message sent to user: \"{agent_summary}\"")
                         elif stripped.startswith("[ESCALATE]"):
-                            outcome = "escalated to main thread"
                             agent_summary = stripped[len("[ESCALATE]"):].lstrip("\n").strip()
+                            note_parts = [
+                                "[background notification processed — escalated to main thread]",
+                                f"Notification received: \"{body}\"",
+                                "Action taken: The notification was escalated and re-injected into this conversation as a new user message. The next user turn contains the escalation context.",
+                            ]
+                            if agent_summary:
+                                note_parts.append(f"Escalation context: \"{agent_summary}\"")
                         else:
-                            outcome = "silent"
                             agent_summary = stripped.strip()
-                        body_excerpt = body[:120] + ("..." if len(body) > 120 else "")
-                        note_parts = [
-                            "[background notification processed]",
-                            f"Notification: \"{body_excerpt}\"",
-                            f"Outcome: {outcome}",
-                        ]
-                        if agent_summary:
-                            note_parts.append(f"Summary: {agent_summary[:300]}")
+                            note_parts = [
+                                "[background notification processed — handled silently]",
+                                f"Notification received: \"{body}\"",
+                                "Action taken: The background agent handled this autonomously. No user message was sent.",
+                            ]
+                            if agent_summary:
+                                note_parts.append(f"Agent summary: \"{agent_summary}\"")
                         self.session_store.append_to_transcript(
                             main_entry.session_id,
                             {
