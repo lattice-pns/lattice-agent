@@ -2832,7 +2832,7 @@ class GatewayRunner:
 
         self._shutdown_gateway_honcho(session_key)
         self._evict_cached_agent(session_key)
-        
+
         # Reset the session
         new_entry = self.session_store.reset_session(session_key)
 
@@ -2849,6 +2849,19 @@ class GatewayRunner:
             "user_id": source.user_id,
             "session_key": session_key,
         })
+
+        # When /new is run from a non-Lattice platform, also reset all Lattice
+        # sessions so the agent starts fresh across the board.
+        if source.platform != Platform.LATTICE:
+            lattice_keys = [
+                k for k in list(self.session_store._entries.keys())
+                if k.startswith("agent:main:lattice:")
+            ]
+            for lk in lattice_keys:
+                self._shutdown_gateway_honcho(lk)
+                self._evict_cached_agent(lk)
+                self.session_store.reset_session(lk)
+                logger.info("Reset Lattice session %s alongside /new", lk)
         
         if new_entry:
             return "✨ Session reset! I've started fresh with no memory of our previous conversation."
