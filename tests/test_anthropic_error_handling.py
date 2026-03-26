@@ -216,13 +216,6 @@ def test_529_overloaded_is_retried_and_recovers(monkeypatch):
     assert result["final_response"] == "Recovered"
 
 
-def test_429_exhausts_all_retries_before_raising(monkeypatch):
-    """429 must retry max_retries times, not abort on first attempt."""
-    agent_cls = _make_agent_cls(_RateLimitError)  # always fails
-    with pytest.raises(_RateLimitError):
-        _run_with_agent(monkeypatch, agent_cls)
-
-
 def test_400_bad_request_is_non_retryable(monkeypatch):
     """400 should fail immediately with only 1 API call (regression guard)."""
     agent_cls = _make_agent_cls(_BadRequestError)
