@@ -52,6 +52,41 @@ def _check_lattice_notify_user() -> bool:
     return os.getenv("HERMES_SESSION_PLATFORM", "") == "lattice"
 
 
+def _resolve_lattice_notify_target(config) -> tuple[str, str]:
+    """Resolve the human delivery target for Lattice notifications."""
+    lattice_cfg = config.platforms.get(Platform.LATTICE)
+    session_target = (
+        (lattice_cfg.extra or {}).get("session_target", {}) if lattice_cfg else {}
+    )
+    target_platform = str(session_target.get("platform", "")).strip().lower()
+    target_chat_id = str(session_target.get("chat_id", "")).strip()
+    if target_platform and target_chat_id:
+        return target_platform, target_chat_id
+
+    # Match GatewayRunner's fallback order: prefer an explicit home channel on a
+    # connected human-facing platform before giving up.
+    platform_order = (
+        Platform.TELEGRAM,
+        Platform.DISCORD,
+        Platform.SLACK,
+        Platform.SIGNAL,
+        Platform.WHATSAPP,
+        Platform.MATTERMOST,
+        Platform.MATRIX,
+        Platform.EMAIL,
+        Platform.SMS,
+    )
+    for platform in platform_order:
+        platform_cfg = config.platforms.get(platform)
+        if not platform_cfg or not platform_cfg.enabled:
+            continue
+        home = config.get_home_channel(platform)
+        if home and getattr(home, "chat_id", ""):
+            return platform.value, str(home.chat_id)
+
+    return "", ""
+
+
 def lattice_notify_user_tool(args: dict, **kwargs) -> str:
     """Send a notification to the user on the configured session_target platform."""
     message = str(args.get("message", "")).strip()
@@ -68,17 +103,16 @@ def lattice_notify_user_tool(args: dict, **kwargs) -> str:
             {"error": f"Failed to load gateway config: {e}"}, ensure_ascii=False
         )
 
-    lattice_cfg = config.platforms.get(Platform.LATTICE)
-    session_target = (
-        (lattice_cfg.extra or {}).get("session_target", {}) if lattice_cfg else {}
-    )
-    target_platform = session_target.get("platform", "")
-    target_chat_id = str(session_target.get("chat_id", ""))
+    target_platform, target_chat_id = _resolve_lattice_notify_target(config)
 
     if not target_platform or not target_chat_id:
         return json.dumps(
             {
-                "error": "session_target not configured — add it to the lattice platform config"
+                "error": (
+                    "No Lattice delivery target configured — set "
+                    "lattice.session_target or configure a home channel on Telegram, "
+                    "Discord, Slack, Signal, WhatsApp, Mattermost, Matrix, Email, or SMS"
+                )
             },
             ensure_ascii=False,
         )
