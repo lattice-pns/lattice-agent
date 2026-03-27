@@ -997,7 +997,7 @@ class GatewayRunner:
                 continue
             
             # Set up message + fatal error handlers
-            adapter.set_message_handler(self._handle_message)
+            adapter.set_message_handler(self._message_handler_for_platform(platform))
             adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
             if platform == Platform.LATTICE:
                 adapter.gateway_runner = self
@@ -1231,7 +1231,7 @@ class GatewayRunner:
                         del self._failed_platforms[platform]
                         continue
 
-                    adapter.set_message_handler(self._handle_message)
+                    adapter.set_message_handler(self._message_handler_for_platform(platform))
                     adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
 
                     success = await adapter.connect()
@@ -1455,6 +1455,7 @@ class GatewayRunner:
                     Platform.DINGTALK: "DINGTALK_ALLOWED_USERS",
                 }
                 chat_id = None
+                target_thread_id = None
                 for p in _platform_order:
                     if p == Platform.LATTICE:
                         continue
@@ -1464,6 +1465,7 @@ class GatewayRunner:
                     if pcfg.home_channel:
                         chat_id = pcfg.home_channel.chat_id
                         target_platform = p
+                        target_thread_id = pcfg.home_channel.thread_id
                         break
                     # Fallback: first user from allowlist (DM chat_id ≈ user_id)
                     env_var = _allowlist_env.get(p)
@@ -1479,6 +1481,8 @@ class GatewayRunner:
                         "platform": target_platform.value,
                         "chat_id": chat_id,
                     }
+                    if target_thread_id:
+                        config.extra["session_target"]["thread_id"] = target_thread_id
                     logger.info(
                         "Lattice: routing to %s session (chat_id=%s)",
                         target_platform.value,
@@ -1502,6 +1506,36 @@ class GatewayRunner:
             return adapter
 
         return None
+
+    def _message_handler_for_platform(self, platform: Platform):
+        """Return the correct inbound message handler for an adapter.
+
+        Most adapters can call ``_handle_message`` directly because their base
+        adapter wrapper is what ultimately sends the final response. Lattice is
+        different: it receives an external notification, rewrites it to target a
+        real platform session (Telegram, Discord, etc.), and must hand the event
+        back to that platform adapter's ``handle_message()`` entrypoint so the
+        normal background-processing and reply-delivery pipeline runs.
+        """
+        if platform != Platform.LATTICE:
+            return self._handle_message
+
+        async def _handle_forwarded_lattice_event(event: MessageEvent) -> None:
+            target_platform = getattr(event.source, "platform", None)
+            target_adapter = self.adapters.get(target_platform) if target_platform else None
+
+            if target_adapter and hasattr(target_adapter, "handle_message"):
+                await target_adapter.handle_message(event)
+                return None
+
+            logger.warning(
+                "Lattice: target adapter %s unavailable; handling notification inline",
+                target_platform.value if target_platform else "unknown",
+            )
+            await self._handle_message(event)
+            return None
+
+        return _handle_forwarded_lattice_event
     
     def _is_user_authorized(self, source: SessionSource) -> bool:
         """
@@ -3182,6 +3216,7 @@ class GatewayRunner:
         platform_name = source.platform.value if source.platform else "unknown"
         chat_id = source.chat_id
         chat_name = source.chat_name or chat_id
+        thread_id = source.thread_id
 
         if source.platform == Platform.LATTICE:
             return (
@@ -3201,15 +3236,41 @@ class GatewayRunner:
                 with open(config_path, encoding="utf-8") as f:
                     user_config = yaml.safe_load(f) or {}
             user_config[env_key] = chat_id
+            platforms_cfg = user_config.setdefault("platforms", {})
+            if not isinstance(platforms_cfg, dict):
+                platforms_cfg = {}
+                user_config["platforms"] = platforms_cfg
+            platform_cfg = platforms_cfg.setdefault(platform_name, {})
+            if not isinstance(platform_cfg, dict):
+                platform_cfg = {}
+                platforms_cfg[platform_name] = platform_cfg
+            home_channel_cfg = {
+                "platform": platform_name,
+                "chat_id": chat_id,
+                "name": chat_name,
+            }
+            if thread_id:
+                home_channel_cfg["thread_id"] = str(thread_id)
+                user_config[f"{platform_name.upper()}_HOME_THREAD_ID"] = str(thread_id)
+            else:
+                user_config.pop(f"{platform_name.upper()}_HOME_THREAD_ID", None)
+            platform_cfg["home_channel"] = home_channel_cfg
             with open(config_path, 'w', encoding="utf-8") as f:
                 yaml.dump(user_config, f, default_flow_style=False)
             # Also set in the current environment so it takes effect immediately
             os.environ[env_key] = str(chat_id)
+            if thread_id:
+                os.environ[f"{platform_name.upper()}_HOME_THREAD_ID"] = str(thread_id)
+            else:
+                os.environ.pop(f"{platform_name.upper()}_HOME_THREAD_ID", None)
         except Exception as e:
             return f"Failed to save home channel: {e}"
         
+        location = f"**{chat_name}** (ID: {chat_id})"
+        if thread_id:
+            location += f", topic `{thread_id}`"
         return (
-            f"✅ Home channel set to **{chat_name}** (ID: {chat_id}).\n"
+            f"✅ Home channel set to {location}.\n"
             f"Cron jobs and cross-platform messages will be delivered here."
         )
     
