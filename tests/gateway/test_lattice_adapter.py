@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gateway.config import GatewayConfig, Platform, PlatformConfig
+from gateway.config import GatewayConfig, HomeChannel, Platform, PlatformConfig
 from gateway.platforms.lattice import (
     DEFAULT_LATTICE_URL,
     LatticeAdapter,
@@ -39,6 +39,35 @@ class TestGatewayRunnerLatticeWiring:
         runner = GatewayRunner(gw)
         adapter = runner._create_adapter(Platform.LATTICE, lattice_cfg)
         assert isinstance(adapter, LatticeAdapter)
+
+    def test_create_adapter_lattice_copies_home_channel_thread_id(self, tmp_path):
+        lattice_cfg = PlatformConfig(enabled=True, extra={})
+        telegram_cfg = PlatformConfig(
+            enabled=True,
+            home_channel=HomeChannel(
+                platform=Platform.TELEGRAM,
+                chat_id="-100123",
+                name="Alerts",
+                thread_id="17585",
+            ),
+        )
+        gw = GatewayConfig(
+            platforms={
+                Platform.LATTICE: lattice_cfg,
+                Platform.TELEGRAM: telegram_cfg,
+            },
+            sessions_dir=tmp_path / "sessions",
+        )
+        runner = GatewayRunner(gw)
+
+        adapter = runner._create_adapter(Platform.LATTICE, lattice_cfg)
+
+        assert isinstance(adapter, LatticeAdapter)
+        assert lattice_cfg.extra["session_target"] == {
+            "platform": "telegram",
+            "chat_id": "-100123",
+            "thread_id": "17585",
+        }
 
 
 _HOME_CHAT_ID = "99"
@@ -156,6 +185,22 @@ class TestGatewayRunnerLatticeHomePrompt:
         assert all("No home channel is set" not in msg for msg in sent_messages)
 
     @pytest.mark.asyncio
+    async def test_lattice_adapter_reuses_target_platform_delivery_pipeline(self):
+        """Forwarded notifications must enter through the target adapter so the
+        normal reply-delivery path sends the agent's final response back to Telegram."""
+        runner = _make_runner_for_lattice_message_flow()
+        target_adapter = runner.adapters[Platform.TELEGRAM]
+        target_adapter.handle_message = AsyncMock()
+
+        event = _make_lattice_event()
+        handler = runner._message_handler_for_platform(Platform.LATTICE)
+
+        await handler(event)
+
+        target_adapter.handle_message.assert_awaited_once_with(event)
+        runner._run_agent.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_sethome_on_lattice_platform_returns_session_target_guidance(self):
         """The LATTICE platform source still returns the session_target guidance message."""
         runner = GatewayRunner.__new__(GatewayRunner)
@@ -253,6 +298,7 @@ class TestLatticeAdapterNotifications:
         assert event.source.chat_id == _HOME_CHAT_ID
         assert event.source.user_id is None
         assert event.source.chat_type == "dm"
+        assert event.source.thread_id is None
         assert event.lattice_sender == sender
         assert event.raw_message.get("from") == sender
 
@@ -312,6 +358,33 @@ class TestLatticeAdapterNotifications:
         event = handler.await_args.args[0]
         assert event.source.platform == Platform.DISCORD
         assert event.source.chat_id == "chan-42"
+
+    @pytest.mark.asyncio
+    async def test_session_target_thread_id_used_for_routing(self, monkeypatch):
+        """session_target thread_id is preserved for topic-aware home channels."""
+        monkeypatch.setenv("LATTICE_PRIVATE_KEY_HEX", TEST_PRIVKEY_HEX)
+        cfg = PlatformConfig(
+            enabled=True,
+            extra={
+                "url": "http://x",
+                "session_target": {
+                    "platform": "telegram",
+                    "chat_id": _HOME_CHAT_ID,
+                    "thread_id": "17585",
+                },
+            },
+        )
+        adapter = LatticeAdapter(cfg)
+
+        handler = AsyncMock()
+        adapter._message_handler = handler
+
+        await adapter._process_notification(json.dumps({"body": "topic-routed"}))
+        handler.assert_awaited_once()
+        event = handler.await_args.args[0]
+        assert event.source.platform == Platform.TELEGRAM
+        assert event.source.chat_id == _HOME_CHAT_ID
+        assert event.source.thread_id == "17585"
 
     @pytest.mark.asyncio
     async def test_invalid_json_drops_silently(self, monkeypatch):

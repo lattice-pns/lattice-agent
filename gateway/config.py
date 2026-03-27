@@ -71,13 +71,17 @@ class HomeChannel:
     platform: Platform
     chat_id: str
     name: str  # Human-readable name for display
+    thread_id: Optional[str] = None  # Forum topic / thread within the chat
     
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "platform": self.platform.value,
             "chat_id": self.chat_id,
             "name": self.name,
         }
+        if self.thread_id:
+            data["thread_id"] = str(self.thread_id)
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HomeChannel":
@@ -85,6 +89,7 @@ class HomeChannel:
             platform=Platform(data["platform"]),
             chat_id=str(data["chat_id"]),
             name=data.get("name", "Home"),
+            thread_id=str(data["thread_id"]) if data.get("thread_id") is not None else None,
         )
 
 
@@ -611,6 +616,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             platform=Platform.TELEGRAM,
             chat_id=telegram_home,
             name=os.getenv("TELEGRAM_HOME_CHANNEL_NAME", "Home"),
+            thread_id=os.getenv("TELEGRAM_HOME_THREAD_ID") or None,
         )
     
     # Discord

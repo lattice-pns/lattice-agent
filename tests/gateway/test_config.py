@@ -20,6 +20,21 @@ class TestHomeChannelRoundtrip:
         assert restored.chat_id == "999"
         assert restored.name == "general"
 
+    def test_to_dict_from_dict_with_thread_id(self):
+        hc = HomeChannel(
+            platform=Platform.TELEGRAM,
+            chat_id="-100123",
+            name="Ops",
+            thread_id="17585",
+        )
+        d = hc.to_dict()
+        restored = HomeChannel.from_dict(d)
+
+        assert restored.platform == Platform.TELEGRAM
+        assert restored.chat_id == "-100123"
+        assert restored.name == "Ops"
+        assert restored.thread_id == "17585"
+
 
 class TestPlatformConfigRoundtrip:
     def test_to_dict_from_dict(self):
@@ -40,6 +55,24 @@ class TestPlatformConfigRoundtrip:
         assert restored.token == "tok_123"
         assert restored.home_channel.chat_id == "555"
         assert restored.extra == {"foo": "bar"}
+        assert restored.home_channel.thread_id is None
+
+    def test_to_dict_from_dict_with_threaded_home_channel(self):
+        pc = PlatformConfig(
+            enabled=True,
+            home_channel=HomeChannel(
+                platform=Platform.TELEGRAM,
+                chat_id="-100777",
+                name="Alerts",
+                thread_id="88",
+            ),
+        )
+
+        restored = PlatformConfig.from_dict(pc.to_dict())
+
+        assert restored.home_channel is not None
+        assert restored.home_channel.chat_id == "-100777"
+        assert restored.home_channel.thread_id == "88"
 
     def test_disabled_no_token(self):
         pc = PlatformConfig()
@@ -192,3 +225,21 @@ class TestLoadGatewayConfig:
 
         assert config.unauthorized_dm_behavior == "ignore"
         assert config.platforms[Platform.WHATSAPP].extra["unauthorized_dm_behavior"] == "pair"
+
+    def test_telegram_home_thread_id_env_override(self, monkeypatch):
+        env = {
+            "TELEGRAM_BOT_TOKEN": "bot-token",
+            "TELEGRAM_HOME_CHANNEL": "-100123456",
+            "TELEGRAM_HOME_CHANNEL_NAME": "Ops",
+            "TELEGRAM_HOME_THREAD_ID": "17585",
+        }
+        with monkeypatch.context() as m:
+            for key, value in env.items():
+                m.setenv(key, value)
+            config = load_gateway_config()
+
+        home = config.platforms[Platform.TELEGRAM].home_channel
+        assert home is not None
+        assert home.chat_id == "-100123456"
+        assert home.name == "Ops"
+        assert home.thread_id == "17585"

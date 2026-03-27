@@ -299,11 +299,13 @@ class LatticeAdapter(BasePlatformAdapter):
         session_target = (self.config.extra or {}).get("session_target", {})
         target_platform = Platform(session_target["platform"])
         target_chat_id = session_target["chat_id"]
+        target_thread_id = session_target.get("thread_id")
         source = SessionSource(
             platform=target_platform,
             chat_id=target_chat_id,
             chat_type="dm",
             user_id=None,
+            thread_id=str(target_thread_id) if target_thread_id is not None else None,
         )
         logger.info(
             "Lattice: forwarding notification from %s to %s session",
