@@ -267,8 +267,7 @@ def session_search(
     The current session is excluded from results since the agent already has that context.
 
     Optional source_filter restricts FTS and recent-session listing to those platform
-    sources (e.g. ``["lattice"]`` for lattice_session_search). Not exposed on the
-    session_search tool schema — callers pass it in code.
+    sources. Not exposed on the session_search tool schema — callers pass it in code.
     """
     if db is None:
         return json.dumps({"success": False, "error": "Session database not available."}, ensure_ascii=False)

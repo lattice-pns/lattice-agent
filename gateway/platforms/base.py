@@ -298,7 +298,11 @@ class MessageEvent:
     
     # Auto-loaded skill for topic/channel bindings (e.g., Telegram DM Topics)
     auto_skill: Optional[str] = None
-    
+
+    # Set when the message is a Lattice notification forwarded to the home session.
+    # Value is the sender's pubkey hex string (or None for anonymous notifications).
+    lattice_sender: Optional[str] = None
+
     # Timestamps
     timestamp: datetime = field(default_factory=datetime.now)
     

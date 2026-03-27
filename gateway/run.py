@@ -2347,12 +2347,13 @@ class GatewayRunner:
             )
         
         # One-time prompt if no home channel is set for this platform.
-        # Lattice routes notifications via session_target / the user's real
-        # messaging platform, so a Lattice "home channel" prompt is misleading.
+        # Skip for LOCAL (no messaging platform) and for forwarded Lattice notifications
+        # (home channel is already set by definition — that's where the notification arrived).
         if (
             not history
             and source.platform
-            and source.platform not in (Platform.LOCAL, Platform.LATTICE)
+            and source.platform not in (Platform.LOCAL,)
+            and not getattr(event, "lattice_sender", None)
         ):
             platform_name = source.platform.value
             env_key = f"{platform_name.upper()}_HOME_CHANNEL"
@@ -2381,25 +2382,22 @@ class GatewayRunner:
                 if vc_context:
                     context_prompt += f"\n\n{vc_context}"
 
-        if source.platform == Platform.LATTICE:
-            _notifications_path = _hermes_home / "NOTIFICATIONS.md"
-            _notifications_content = (
-                _notifications_path.read_text(encoding="utf-8").strip()
-                if _notifications_path.exists()
+        if getattr(event, "lattice_sender", None):
+            _contacts_path = _hermes_home / "CONTACTS.md"
+            _contacts_content = (
+                _contacts_path.read_text(encoding="utf-8").strip()
+                if _contacts_path.exists()
                 else ""
             )
             context_prompt += (
-                "\n\n[System note: You are processing an incoming Lattice "
-                "notification autonomously. It may be either a direct notification or a "
-                "message originating from another agent. The user is NOT watching this "
-                f"conversation.\n\nNotification policy (from ~/.hermes/NOTIFICATIONS.md):\n"
-                f"{_notifications_content}\n\n"
-                "Do not edit ~/.hermes/NOTIFICATIONS.md or otherwise change notification "
-                "criteria from this run; the user maintains that file.\n\n"
-                "Your final response text is stored in the session transcript but is NOT "
-                "delivered anywhere. Use the tools above only when outbound communication is "
-                "actually necessary.]"
+                "\n\n[System note: The message above is a forwarded Lattice notification"
+                f" from agent pubkey {event.lattice_sender}."
             )
+            if _contacts_content:
+                context_prompt += (
+                    f"\n\nAgent contacts (from ~/.hermes/CONTACTS.md):\n{_contacts_content}"
+                )
+            context_prompt += "]"
 
         # -----------------------------------------------------------------
         # Auto-analyze images sent by the user
@@ -2561,6 +2559,19 @@ class GatewayRunner:
                         message_text = _ctx_result.message
                 except Exception as exc:
                     logger.debug("@ context reference expansion failed: %s", exc)
+
+            # Forward Lattice notifications visibly so the user can see them.
+            if getattr(event, "lattice_sender", None):
+                _notif_adapter = self.adapters.get(source.platform)
+                if _notif_adapter:
+                    _sender_display = event.lattice_sender
+                    try:
+                        await _notif_adapter.send(
+                            source.chat_id,
+                            f"📡 Lattice notification from `{_sender_display}`:\n{event.text}",
+                        )
+                    except Exception:
+                        pass
 
             # Run the agent
             agent_result = await self._run_agent(

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Lattice Tools -- Agent-to-Agent Messaging and Session Search
+Lattice Tools -- Agent-to-Agent Messaging
 
-Allows the AI to send messages to other agents, inspect its own identity
-via the Lattice agent-to-agent messaging endpoint, and search past Lattice
-notification sessions.
+Allows the AI to send messages to other agents and inspect its own identity
+via the Lattice agent-to-agent messaging endpoint.
 
 Requires:
 - LATTICE_URL env var
@@ -14,14 +13,10 @@ Requires:
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from tools.lattice_auth import get_post_auth_headers
 from tools.registry import registry
-from tools.session_search_tool import (
-    check_session_search_requirements as check_lattice_session_search_requirements,
-    session_search as _session_search,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -156,68 +151,6 @@ async def lattice_get_pubkey_tool(args: Dict[str, Any], **kwargs) -> str:
         return json.dumps({"error": str(e)})
 
 
-# ── lattice_session_search ────────────────────────────────────────────────────
-
-LATTICE_SESSION_SEARCH_SCHEMA = {
-    "name": "lattice_session_search",
-    "description": (
-        "Search past Lattice agent-to-agent notification threads. "
-        "Use this to recall what agent notifications have been received, "
-        "what actions were taken in response, and what the outcomes were.\n\n"
-        "TWO MODES:\n"
-        "1. Recent sessions (no query): Call with no arguments to see recent lattice activity.\n"
-        "2. Keyword search (with query): Search for specific topics across all lattice sessions.\n\n"
-        'Search syntax: keywords, phrases ("exact phrase"), boolean (python NOT java), prefix (deploy*).'
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query — omit to browse recent lattice sessions.",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Max sessions to summarize (default: 3, max: 5).",
-                "default": 3,
-            },
-        },
-        "required": [],
-    },
-}
-
-
-def lattice_session_search(
-    query: str,
-    limit: int = 3,
-    db=None,
-    current_session_id: Optional[str] = None,
-) -> str:
-    """
-    Search past lattice platform sessions and return focused summaries.
-
-    Delegates to the session_search machinery but pins source_filter to ["lattice"]
-    so only lattice-platform sessions are returned.
-    """
-    if db is None:
-        logger.debug(
-            "lattice_session_search: session DB is None — was GatewayRunner._session_db initialized?"
-        )
-        return json.dumps(
-            {"success": False, "error": "Session database not available."},
-            ensure_ascii=False,
-        )
-
-    return _session_search(
-        query=query or "",
-        role_filter=None,
-        limit=limit,
-        db=db,
-        current_session_id=current_session_id,
-        source_filter=["lattice"],
-    )
-
-
 # ── requirements check ────────────────────────────────────────────────────────
 
 
@@ -258,18 +191,4 @@ registry.register(
     check_fn=check_lattice_requirements,
     is_async=True,
     emoji="🔑",
-)
-
-registry.register(
-    name="lattice_session_search",
-    toolset="lattice",
-    schema=LATTICE_SESSION_SEARCH_SCHEMA,
-    handler=lambda args, **kw: lattice_session_search(
-        query=args.get("query") or "",
-        limit=args.get("limit", 3),
-        db=kw.get("db"),
-        current_session_id=kw.get("current_session_id"),
-    ),
-    check_fn=check_lattice_session_search_requirements,
-    emoji="🔎",
 )

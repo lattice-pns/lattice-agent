@@ -2,17 +2,18 @@
 Lattice platform adapter.
 
 Connects to a Lattice push notification server via SSE.
-Inbound notifications are routed through the gateway message handler as
-first-class LATTICE platform sessions.
+Inbound notifications are forwarded directly to the user's home (main) session
+on their primary messaging platform (Telegram, Discord, etc.) rather than
+spawning a separate LATTICE session.
 
 Configuration:
 - LATTICE_URL env var (optional; defaults to https://pns.1lattice.co)
 - LATTICE_PRIVATE_KEY_HEX (optional; auto-generated and persisted on first run)
-- session_target in config.yaml extra (required by the lattice_notify_user tool to
-  identify the human's main platform chat)
+- session_target in config.yaml extra (resolved automatically from the home
+  channel of the first connected messaging platform)
 
 SSE notification JSON may include optional field `from` (sender pubkey hex),
-used as the session chat_id so each sender agent gets its own session thread.
+carried through as MessageEvent.lattice_sender for context injection.
 
 Lattice auth: Ed25519 keypair. Sign payload ";{unix_timestamp}" for GET requests.
 """
@@ -293,26 +294,28 @@ class LatticeAdapter(BasePlatformAdapter):
         sender = (data.get("from") or "").strip()
 
         text = body or "(empty notification)"
-        if sender:
-            text = f"[from agent {sender}]\n{text}"
 
-        # Each sender agent gets its own LATTICE session keyed by their pubkey.
-        chat_id = sender if sender else "lattice"
+        # Route to the home (main) session so the primary agent handles it inline.
+        session_target = (self.config.extra or {}).get("session_target", {})
+        target_platform = Platform(session_target["platform"])
+        target_chat_id = session_target["chat_id"]
         source = SessionSource(
-            platform=Platform.LATTICE,
-            chat_id=chat_id,
+            platform=target_platform,
+            chat_id=target_chat_id,
             chat_type="dm",
-            user_id=sender if sender else None,
+            user_id=None,
         )
         logger.info(
-            "Lattice: dispatching notification from %s",
-            (chat_id[:16] + "...") if len(chat_id) > 16 else chat_id,
+            "Lattice: forwarding notification from %s to %s session",
+            sender or "SYSTEM",
+            target_platform.value,
         )
         event = MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
             source=source,
             raw_message=data,
+            lattice_sender=sender or "SYSTEM",
         )
 
         if self._message_handler:

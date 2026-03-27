@@ -43,7 +43,7 @@ _EXTRA_ENV_KEYS = frozenset({
 import yaml
 
 from hermes_cli.colors import Colors, color
-from hermes_cli.default_notifications import DEFAULT_NOTIFICATIONS_MD
+from hermes_cli.default_contacts_md import DEFAULT_CONTACTS_MD
 from hermes_cli.default_soul import DEFAULT_SOUL_MD
 
 
@@ -118,13 +118,13 @@ def _ensure_default_soul_md(home: Path) -> None:
     _secure_file(soul_path)
 
 
-def _ensure_default_notifications_md(home: Path) -> None:
-    """Seed a default NOTIFICATIONS.md into HERMES_HOME if the user doesn't have one yet."""
-    notifications_path = home / "NOTIFICATIONS.md"
-    if notifications_path.exists():
+def _ensure_default_contacts_md(home: Path) -> None:
+    """Seed a default CONTACTS.md into HERMES_HOME if the user doesn't have one yet."""
+    contacts_path = home / "CONTACTS.md"
+    if contacts_path.exists():
         return
-    notifications_path.write_text(DEFAULT_NOTIFICATIONS_MD, encoding="utf-8")
-    _secure_file(notifications_path)
+    contacts_path.write_text(DEFAULT_CONTACTS_MD, encoding="utf-8")
+    _secure_file(contacts_path)
 
 
 def ensure_hermes_home():
@@ -137,7 +137,7 @@ def ensure_hermes_home():
         d.mkdir(parents=True, exist_ok=True)
         _secure_dir(d)
     _ensure_default_soul_md(home)
-    _ensure_default_notifications_md(home)
+    _ensure_default_contacts_md(home)
 
 
 # =============================================================================

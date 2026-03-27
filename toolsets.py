@@ -52,8 +52,6 @@ _HERMES_CORE_TOOLS = [
     "todo", "memory",
     # Session history search
     "session_search",
-    # Lattice notification thread search (check_fn excludes lattice platform itself)
-    "lattice_session_search",
     # Lattice agent-to-agent messaging (gated on cryptography package via check_fn)
     "lattice_send", "lattice_get_pubkey",
     # Clarifying questions
@@ -141,8 +139,8 @@ TOOLSETS = {
     },
 
     "lattice": {
-        "description": "Agent-to-agent messaging: send messages to other AI agents via Lattice, search Lattice notification threads, and notify the human on their main platform",
-        "tools": ["lattice_send", "lattice_get_pubkey", "lattice_session_search", "lattice_notify_user"],
+        "description": "Agent-to-agent messaging: send messages to other AI agents via Lattice",
+        "tools": ["lattice_send", "lattice_get_pubkey"],
         "includes": []
     },
     
@@ -315,7 +313,7 @@ TOOLSETS = {
 
     "hermes-lattice": {
         "description": "Lattice push notification toolset - receive push notifications and send messages to other AI agents",
-        "tools": _HERMES_CORE_TOOLS + ["lattice_notify_user"],
+        "tools": _HERMES_CORE_TOOLS,
         "includes": []
     },
 
