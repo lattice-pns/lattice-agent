@@ -1612,8 +1612,10 @@ class GatewayRunner:
         """
         source = event.source
 
+        # Forwarded Lattice notifications are pre-authorized — the SSE connection
+        # uses Ed25519 auth, so no pairing check is needed.
         # Check if user is authorized
-        if not self._is_user_authorized(source):
+        if not getattr(event, "lattice_sender", None) and not self._is_user_authorized(source):
             logger.warning("Unauthorized user: %s (%s) on %s", source.user_id, source.user_name, source.platform.value)
             # In DMs: offer pairing code. In groups: silently ignore.
             if source.chat_type == "dm" and self._get_unauthorized_dm_behavior(source.platform) == "pair":

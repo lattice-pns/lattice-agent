@@ -45,7 +45,9 @@ _HOME_CHAT_ID = "99"
 _SESSION_TARGET = {"platform": "telegram", "chat_id": _HOME_CHAT_ID}
 
 
-def _make_lattice_event(text: str = "hello", lattice_sender: str = None) -> MessageEvent:
+def _make_lattice_event(
+    text: str = "hello", lattice_sender: str = None
+) -> MessageEvent:
     """Create a forwarded Lattice notification event (source = home platform)."""
     return MessageEvent(
         text=text,
@@ -122,7 +124,9 @@ class TestCheckLatticeRequirements:
 
 class TestGatewayRunnerLatticeHomePrompt:
     @pytest.mark.asyncio
-    async def test_forwarded_lattice_notification_skips_home_channel_prompt(self, monkeypatch):
+    async def test_forwarded_lattice_notification_skips_home_channel_prompt(
+        self, monkeypatch
+    ):
         """Forwarded Lattice notifications (lattice_sender set) must not trigger the
         'no home channel' prompt — the home channel is already set by definition."""
         import gateway.run as gateway_run
@@ -271,7 +275,7 @@ class TestLatticeAdapterNotifications:
         event = handler.await_args.args[0]
         assert event.source.platform == Platform.TELEGRAM
         assert event.source.chat_id == _HOME_CHAT_ID
-        assert event.lattice_sender is None
+        assert event.lattice_sender == "SYSTEM"
 
     @pytest.mark.asyncio
     async def test_drops_silently_without_message_handler(self, monkeypatch):
